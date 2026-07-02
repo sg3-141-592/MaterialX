@@ -44,7 +44,7 @@ class TangentOsl : public mx::ShaderNodeImpl
         {
             shadergen.emitLineBegin(stage);
             shadergen.emitOutput(node.getOutput(), true, false, context, stage);
-            shadergen.emitString(" = normalize(vector(N[2], 0, -N[0]))", stage);
+            shadergen.emitString(" = normalize(dPdu)", stage);
             shadergen.emitLineEnd(stage);
         }
     }
@@ -66,7 +66,7 @@ class BitangentOsl : public mx::ShaderNodeImpl
         {
             shadergen.emitLineBegin(stage);
             shadergen.emitOutput(node.getOutput(), true, false, context, stage);
-            shadergen.emitString(" = normalize(cross(N, vector(N[2], 0, -N[0])))", stage);
+            shadergen.emitString(" = normalize(cross(N, normalize(dPdu)))", stage);
             shadergen.emitLineEnd(stage);
         }
     }
@@ -112,6 +112,8 @@ class OslShaderRenderTester : public RenderUtil::ShaderRenderTester
             _skipFiles.insert("vertical_layering.mtlx");
             _skipFiles.insert("mix_bsdf.mtlx");
         }
+
+        RenderUtil::ShaderRenderTester::addSkipFiles();
     }
 
     bool saveImage(const mx::FilePath& filePath, mx::ConstImagePtr image, bool /*verticalFlip*/) const override
@@ -283,8 +285,10 @@ RenderUtil::RenderProfileResult OslShaderRenderTester::runRenderer(
                 // Set renderer properties.
                 _renderer->setOslOutputFilePath(outputFilePath);
                 _renderer->setOslShaderName(shaderName);
-                _renderer->setRaysPerPixelLit(testOptions.enableReferenceQuality ? 32 : 4);
-                _renderer->setRaysPerPixelUnlit(testOptions.enableReferenceQuality ? 8 : 1);
+                // The antialiasing flag in testrender traces N*N samples per pixel,
+                // so these values are effectively squared.
+                _renderer->setAaLit(testOptions.enableReferenceQuality ? 16 : 2);
+                _renderer->setAaUnlit(testOptions.enableReferenceQuality ? 2 : 1);
 
                 // Validate compilation
                 if (!_useOslCmdStr)
