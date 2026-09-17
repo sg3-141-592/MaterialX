@@ -299,6 +299,12 @@ class Graph
     void saveGraphToFile();
     void loadGeometry();
 
+    // Set the active render backend, re-creating the render view as needed.
+    void setRenderBackend(const std::string& backendName);
+
+    // Create a render view for the given backend name.
+    void createRenderView(const std::string& backendName);
+
     // Initialize the graph state from the current document.
     void initializeGraph();
 
@@ -345,6 +351,12 @@ class Graph
     mx::FilePath _materialFilename;
     mx::DocumentPtr _graphDoc;
     mx::StringSet _xincludeFiles;
+
+    // render view initialization information
+    mx::FilePath _meshFilename;
+    mx::FilePath _envRadianceFilename;
+    int _viewWidth = 0;
+    int _viewHeight = 0;
 
     mx::FileSearchPath _searchPath;
     mx::FilePathVec _libraryFolders;

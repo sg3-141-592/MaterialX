@@ -40,6 +40,12 @@ class GlslRenderView : public RenderViewBase
                    int viewHeight);
     ~GlslRenderView() = default;
 
+    // Return the name of this render backend.
+    std::string getBackendName() const override
+    {
+        return "GLSL";
+    }
+
     // Initialize the viewer for rendering.
     void initialize() override;
 

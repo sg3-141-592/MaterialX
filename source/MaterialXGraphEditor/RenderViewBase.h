@@ -32,6 +32,9 @@ class RenderViewBase
   public:
     virtual ~RenderViewBase() = default;
 
+    /// Return the name of this render backend (e.g. "GLSL").
+    virtual std::string getBackendName() const = 0;
+
     /// Initialize the render view for rendering.
     virtual void initialize() = 0;
 

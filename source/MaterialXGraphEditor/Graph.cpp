@@ -115,6 +115,11 @@ static float getUiScaleFromFont()
     return (fontSize > 0.0f) ? (fontSize / BASE_UI_FONT_SIZE) : 1.0f;
 }
 
+// The set of render backends that can be selected from the Viewer menu.
+const std::vector<std::string> RENDER_BACKENDS = {
+    "GLSL"
+};
+
 } // anonymous namespace
 
 //
@@ -169,21 +174,55 @@ Graph::Graph(const std::string& materialFilename,
     createNodeUIList(_stdLib);
     initializeGraph();
 
-    // Create a renderer using the initial startup document.
-    mx::FilePath captureFilename = "resources/Materials/Examples/example.png";
-    std::string envRadianceFilename = "resources/Lights/san_giuseppe_bridge_split.hdr";
-    _renderer = std::make_shared<GlslRenderView>(_graphDoc, _stdLib, meshFilename, envRadianceFilename,
-                                             _searchPath, viewWidth, viewHeight);
+    // Store the render view initialization information.
+    _meshFilename = meshFilename;
+    _envRadianceFilename = "resources/Lights/san_giuseppe_bridge_split.hdr";
+    _viewWidth = viewWidth;
+    _viewHeight = viewHeight;
+
+    // Create the initial render view.
+    createRenderView("GLSL");
+}
+
+void Graph::setRenderBackend(const std::string& backendName)
+{
+    if (_renderer && backendName == _renderer->getBackendName())
+    {
+        return;
+    }
+    createRenderView(backendName);
+}
+
+void Graph::createRenderView(const std::string& backendName)
+{
+    // Create a render view for the requested backend.
+    if (backendName == "GLSL")
+    {
+        _renderer = std::make_shared<GlslRenderView>(_graphDoc, _stdLib, _meshFilename.asString(),
+                                                     _envRadianceFilename.asString(), _searchPath,
+                                                     _viewWidth, _viewHeight);
+    }
+    else
+    {
+        std::cerr << "Unsupported render backend: " << backendName << std::endl;
+        return;
+    }
+
     _renderer->initialize();
+
+    _imageFilter.clear();
     for (const std::string& ext : _renderer->getImageHandler()->supportedExtensions())
     {
         _imageFilter.emplace_back("." + ext);
     }
-    _renderer->updateMaterials(nullptr);
+
+    _xincludeFiles.clear();
     for (const std::string& incl : _renderer->getXincludeFiles())
     {
         _xincludeFiles.insert(incl);
     }
+
+    updateMaterials();
 }
 
 mx::ElementPredicate Graph::getElementPredicate() const
@@ -3201,6 +3240,19 @@ void Graph::graphButtons()
             if (ImGui::MenuItem("Load Geometry"))
             {
                 loadGeometry();
+            }
+            ImGui::Separator();
+            if (ImGui::BeginMenu("Render Backend"))
+            {
+                const std::string activeBackend = _renderer ? _renderer->getBackendName() : mx::EMPTY_STRING;
+                for (const std::string& backend : RENDER_BACKENDS)
+                {
+                    if (ImGui::MenuItem(backend.c_str(), nullptr, backend == activeBackend))
+                    {
+                        setRenderBackend(backend);
+                    }
+                }
+                ImGui::EndMenu();
             }
             ImGui::EndMenu();
         }
