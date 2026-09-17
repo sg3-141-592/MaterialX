@@ -4,6 +4,7 @@
 //
 
 #include <MaterialXGraphEditor/Graph.h>
+#include <MaterialXGraphEditor/GlslRenderView.h>
 
 #include <MaterialXRenderGlsl/External/Glad/glad.h>
 #include <MaterialXFormat/Util.h>
@@ -108,15 +109,6 @@ std::string getUserNodeDefName(const std::string& val)
     return result;
 }
 
-static void EnableSRGBCallback(const ImDrawList*, const ImDrawCmd*)
-{
-    glEnable(GL_FRAMEBUFFER_SRGB);
-}
-static void DisableSRGBCallback(const ImDrawList*, const ImDrawCmd*)
-{
-    glDisable(GL_FRAMEBUFFER_SRGB);
-}
-
 static float getUiScaleFromFont()
 {
     const float fontSize = ImGui::GetFontSize();
@@ -180,7 +172,7 @@ Graph::Graph(const std::string& materialFilename,
     // Create a renderer using the initial startup document.
     mx::FilePath captureFilename = "resources/Materials/Examples/example.png";
     std::string envRadianceFilename = "resources/Lights/san_giuseppe_bridge_split.hdr";
-    _renderer = std::make_shared<RenderView>(_graphDoc, _stdLib, meshFilename, envRadianceFilename,
+    _renderer = std::make_shared<GlslRenderView>(_graphDoc, _stdLib, meshFilename, envRadianceFilename,
                                              _searchPath, viewWidth, viewHeight);
     _renderer->initialize();
     for (const std::string& ext : _renderer->getImageHandler()->supportedExtensions())
@@ -802,7 +794,7 @@ void Graph::updateMaterials(mx::InputPtr input /* = nullptr */, mx::ValuePtr val
             // Note that if there is a topogical change due to
             // this value change or a transparency change, then
             // this is not currently caught here.
-            _renderer->getMaterials()[0]->modifyUniform(name, value);
+            _renderer->modifyUniform(name, value);
         }
     }
 }
@@ -2577,9 +2569,6 @@ bool Graph::checkCanAddLink(ed::PinId startPinId, ed::PinId endPinId)
     UiNodePtr uiDownNode = _state.nodes[downNode];
     UiNodePtr uiUpNode = _state.nodes[upNode];
 
-    // Make sure there is an implementation for node
-    const mx::ShaderGenerator& shadergen = _renderer->getGenContext().getShaderGenerator();
-
     // Prevent direct connecting from input to output
     if (uiDownNode->getInput() && uiUpNode->getOutput())
     {
@@ -2595,8 +2584,7 @@ bool Graph::checkCanAddLink(ed::PinId startPinId, ed::PinId endPinId)
     }
     else if (uiUpNode->getNode())
     {
-        mx::ShaderNodeImplPtr impl = shadergen.getImplementation(*_state.nodes[upNode]->getNode()->getNodeDef(), _renderer->getGenContext());
-        if (!impl)
+        if (!_renderer->isNodeDefSupported(_state.nodes[upNode]->getNode()->getNodeDef()))
         {
             showLabel("Invalid Connection: Node does not have an implementation", ImColor(50, 50, 50, 255));
             return false;
@@ -3332,16 +3320,15 @@ void Graph::graphButtons()
     if (_renderer)
     {
         // Enable sRGB conversion for framebuffer ONLY when drawing material preview
-        ImGui::GetWindowDrawList()->AddCallback(EnableSRGBCallback, nullptr);
+        _renderer->beginFrameDisplay();
 
         _renderer->getViewCamera()->setViewportSize(mx::Vector2(screenSize[0], screenSize[1]));
-        GLuint64 my_image_texture = _renderer->_textureID;
-        mx::Vector2 vec = _renderer->getViewCamera()->getViewportSize();
+        GLuint64 my_image_texture = _renderer->getRenderTextureId();
 
         ImGui::Image((ImTextureID) my_image_texture, screenSize, ImVec2(0, 1), ImVec2(1, 0));
 
         // Disable sRGB conversion for all other imgui ui components.
-        ImGui::GetWindowDrawList()->AddCallback(DisableSRGBCallback, nullptr);
+        _renderer->endFrameDisplay();
     }
 
     ImGui::Separator();

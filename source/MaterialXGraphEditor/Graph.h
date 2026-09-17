@@ -8,10 +8,14 @@
 
 #include <MaterialXGraphEditor/FileDialog.h>
 #include <MaterialXGraphEditor/Layout.h>
-#include <MaterialXGraphEditor/RenderView.h>
+#include <MaterialXGraphEditor/RenderViewBase.h>
 #include <MaterialXGraphEditor/UiNode.h>
 
+#include <MaterialXRender/Util.h>
+
 #include <imgui_node_editor.h>
+
+#include <map>
 
 namespace ed = ax::NodeEditor;
 namespace mx = MaterialX;
@@ -116,7 +120,7 @@ class Graph
     mx::DocumentPtr loadDocument(const mx::FilePath& filename);
     void drawGraph(ImVec2 mousePos);
 
-    RenderViewPtr getRenderer()
+    RenderViewBasePtr getRenderer()
     {
         return _renderer;
     }
@@ -335,7 +339,7 @@ class Graph
     mx::StringVec _mtlxFilter;
     mx::StringVec _imageFilter;
 
-    RenderViewPtr _renderer;
+    RenderViewBasePtr _renderer;
 
     // document and initializing information
     mx::FilePath _materialFilename;
