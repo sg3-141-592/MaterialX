@@ -35,6 +35,9 @@ const std::string options =
     "    --fontSize [SIZE]              Specify font size to use for the custom font.  If not specified a default of 18 will be used.\n"
     "    --captureFilename [FILENAME]   Specify the filename to which the first rendered frame should be written\n"
     "    --previewWidth [WIDTH]         Specify the width for image previews\n"
+    "    --oslOslc [FILENAME]           Specify the path to the OSL compiler (oslc) executable\n"
+    "    --oslTestrender [FILENAME]     Specify the path to the OSL testrender executable\n"
+    "    --oslIncludePath [PATH]        Specify the OSL include path (containing stdosl.h)\n"
     "    --pinsOnBorder [true|false]    Specify whether node pins should be drawn on the border of nodes (true) or inside the node (false).  Default is true.\n"
     "    --pinShape [circle|flow]       Specify the shape of node pins (circle, flow).  Default is circle.\n"
     "    --help                         Display the complete list of command-line options\n";
@@ -77,6 +80,9 @@ int main(int argc, char* const argv[])
     int fontSize = 18;
     float previewWidth = 256.0f;
     std::string captureFilename;
+    std::string oslCompilerExecutable;
+    std::string oslTestRenderExecutable;
+    std::string oslIncludePath;
     bool pinsOnBorder = true;
     std::string pinShape = "circle";
 
@@ -128,6 +134,18 @@ int main(int argc, char* const argv[])
         else if (token == "--captureFilename")
         {
             parseToken(nextToken, "string", captureFilename);
+        }
+        else if (token == "--oslOslc")
+        {
+            parseToken(nextToken, "string", oslCompilerExecutable);
+        }
+        else if (token == "--oslTestrender")
+        {
+            parseToken(nextToken, "string", oslTestRenderExecutable);
+        }
+        else if (token == "--oslIncludePath")
+        {
+            parseToken(nextToken, "string", oslIncludePath);
         }
         else if (token == "--pinsOnBorder")
         {
@@ -252,7 +270,10 @@ int main(int argc, char* const argv[])
                              viewHeight,
                              previewWidth,
                              pinsOnBorder,
-                             pinShape);
+                             pinShape,
+                             oslCompilerExecutable,
+                             oslTestRenderExecutable,
+                             oslIncludePath);
     if (!captureFilename.empty())
     {
         graph->getRenderer()->requestFrameCapture(captureFilename);

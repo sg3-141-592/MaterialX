@@ -5,6 +5,9 @@
 
 #include <MaterialXGraphEditor/Graph.h>
 #include <MaterialXGraphEditor/GlslRenderView.h>
+#ifdef MATERIALX_BUILD_GEN_OSL
+#include <MaterialXGraphEditor/OslRenderView.h>
+#endif
 
 #include <MaterialXRenderGlsl/External/Glad/glad.h>
 #include <MaterialXFormat/Util.h>
@@ -118,6 +121,9 @@ static float getUiScaleFromFont()
 // The set of render backends that can be selected from the Viewer menu.
 const std::vector<std::string> RENDER_BACKENDS = {
     "GLSL"
+#ifdef MATERIALX_BUILD_GEN_OSL
+    , "OSL"
+#endif
 };
 
 } // anonymous namespace
@@ -134,7 +140,10 @@ Graph::Graph(const std::string& materialFilename,
              int viewHeight,
              float previewWidth,
              bool pinsOnBorder,
-             const std::string& pinShape) :
+             const std::string& pinShape,
+             const std::string& oslCompilerExecutable,
+             const std::string& oslTestRenderExecutable,
+             const std::string& oslIncludePath) :
     _materialFilename(materialFilename),
     _searchPath(searchPath),
     _libraryFolders(libraryFolders),
@@ -180,6 +189,11 @@ Graph::Graph(const std::string& materialFilename,
     _viewWidth = viewWidth;
     _viewHeight = viewHeight;
 
+    // Store the OSL render backend initialization information.
+    _oslCompilerExecutable = oslCompilerExecutable;
+    _oslTestRenderExecutable = oslTestRenderExecutable;
+    _oslIncludePath = oslIncludePath;
+
     // Create the initial render view.
     createRenderView("GLSL");
 }
@@ -195,33 +209,55 @@ void Graph::setRenderBackend(const std::string& backendName)
 
 void Graph::createRenderView(const std::string& backendName)
 {
-    // Create a render view for the requested backend.
-    if (backendName == "GLSL")
+    // Reuse an existing render view for this backend when available, so that
+    // OpenGL resources are not torn down and rebuilt on every backend switch.
+    auto renderViewIt = _renderViews.find(backendName);
+    if (renderViewIt == _renderViews.end())
     {
-        _renderer = std::make_shared<GlslRenderView>(_graphDoc, _stdLib, _meshFilename.asString(),
-                                                     _envRadianceFilename.asString(), _searchPath,
-                                                     _viewWidth, _viewHeight);
-    }
-    else
-    {
-        std::cerr << "Unsupported render backend: " << backendName << std::endl;
-        return;
+        // Create a render view for the requested backend.
+        RenderViewBasePtr renderView;
+        if (backendName == "GLSL")
+        {
+            renderView = std::make_shared<GlslRenderView>(_graphDoc, _stdLib, _meshFilename.asString(),
+                                                          _envRadianceFilename.asString(), _searchPath,
+                                                          _viewWidth, _viewHeight);
+        }
+#ifdef MATERIALX_BUILD_GEN_OSL
+        else if (backendName == "OSL")
+        {
+            renderView = std::make_shared<OslRenderView>(_graphDoc, _stdLib, _meshFilename.asString(),
+                                                         _envRadianceFilename.asString(), _searchPath,
+                                                         _viewWidth, _viewHeight,
+                                                         _oslCompilerExecutable, _oslTestRenderExecutable,
+                                                         _oslIncludePath);
+        }
+#endif
+        else
+        {
+            std::cerr << "Unsupported render backend: " << backendName << std::endl;
+            return;
+        }
+
+        renderView->initialize();
+
+        _imageFilter.clear();
+        for (const std::string& ext : renderView->getImageHandler()->supportedExtensions())
+        {
+            _imageFilter.emplace_back("." + ext);
+        }
+
+        _xincludeFiles.clear();
+        for (const std::string& incl : renderView->getXincludeFiles())
+        {
+            _xincludeFiles.insert(incl);
+        }
+
+        _renderViews[backendName] = renderView;
     }
 
-    _renderer->initialize();
+    _renderer = _renderViews[backendName];
 
-    _imageFilter.clear();
-    for (const std::string& ext : _renderer->getImageHandler()->supportedExtensions())
-    {
-        _imageFilter.emplace_back("." + ext);
-    }
-
-    _xincludeFiles.clear();
-    for (const std::string& incl : _renderer->getXincludeFiles())
-    {
-        _xincludeFiles.insert(incl);
-    }
-
+    // Refresh the materials for the newly active backend.
     updateMaterials();
 }
 

@@ -80,6 +80,10 @@ set(MATERIALX_LIBRARIES
     MaterialXGenGlsl
     MaterialXRenderGlsl)
 
+if(MATERIALX_BUILD_GEN_OSL)
+    list(APPEND MATERIALX_LIBRARIES MaterialXGenOsl MaterialXRenderOsl)
+endif()
+
 if(APPLE)
     find_library(CORE_FOUNDATION Foundation REQUIRED)
     list(APPEND MATERIALX_LIBRARIES ${CORE_FOUNDATION})

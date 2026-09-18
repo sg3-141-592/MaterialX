@@ -690,6 +690,11 @@ void GlslRenderView::initContext(mx::GenContext& context)
 
 void GlslRenderView::drawContents()
 {
+    // Drain any OpenGL errors left over from another render backend (e.g.
+    // OSL) or from tearing down a previous render view, so that they are not
+    // reported against this backend's program binds.
+    while (glGetError()) { }
+
     updateCameras();
     glClearColor(1.0, 1.0, 1.0, 1.0);
 

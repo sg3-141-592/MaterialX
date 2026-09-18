@@ -114,7 +114,10 @@ class Graph
           int viewHeight,
           float previewWidth,
           bool pinsOnBorder,
-          const std::string& pinShape);
+          const std::string& pinShape,
+          const std::string& oslCompilerExecutable = mx::EMPTY_STRING,
+          const std::string& oslTestRenderExecutable = mx::EMPTY_STRING,
+          const std::string& oslIncludePath = mx::EMPTY_STRING);
     ~Graph() = default;
 
     mx::DocumentPtr loadDocument(const mx::FilePath& filename);
@@ -347,6 +350,10 @@ class Graph
 
     RenderViewBasePtr _renderer;
 
+    // Render views by backend name, kept alive across backend switches so that
+    // OpenGL resources are not torn down and rebuilt on every switch.
+    std::unordered_map<std::string, RenderViewBasePtr> _renderViews;
+
     // document and initializing information
     mx::FilePath _materialFilename;
     mx::DocumentPtr _graphDoc;
@@ -357,6 +364,11 @@ class Graph
     mx::FilePath _envRadianceFilename;
     int _viewWidth = 0;
     int _viewHeight = 0;
+
+    // OSL render backend initialization information
+    std::string _oslCompilerExecutable;
+    std::string _oslTestRenderExecutable;
+    std::string _oslIncludePath;
 
     mx::FileSearchPath _searchPath;
     mx::FilePathVec _libraryFolders;
