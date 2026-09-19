@@ -143,7 +143,8 @@ Graph::Graph(const std::string& materialFilename,
              const std::string& pinShape,
              const std::string& oslCompilerExecutable,
              const std::string& oslTestRenderExecutable,
-             const std::string& oslIncludePath) :
+             const std::string& oslIncludePath,
+             const std::string& oslShaderPath) :
     _materialFilename(materialFilename),
     _searchPath(searchPath),
     _libraryFolders(libraryFolders),
@@ -193,6 +194,7 @@ Graph::Graph(const std::string& materialFilename,
     _oslCompilerExecutable = oslCompilerExecutable;
     _oslTestRenderExecutable = oslTestRenderExecutable;
     _oslIncludePath = oslIncludePath;
+    _oslShaderPath = oslShaderPath;
 
     // Create the initial render view.
     createRenderView("GLSL");
@@ -229,7 +231,7 @@ void Graph::createRenderView(const std::string& backendName)
                                                          _envRadianceFilename.asString(), _searchPath,
                                                          _viewWidth, _viewHeight,
                                                          _oslCompilerExecutable, _oslTestRenderExecutable,
-                                                         _oslIncludePath);
+                                                         _oslIncludePath, _oslShaderPath);
         }
 #endif
         else

@@ -38,7 +38,8 @@ class OslRenderView : public RenderViewBase
                   int viewHeight,
                   const std::string& oslCompilerExecutable,
                   const std::string& oslTestRenderExecutable,
-                  const std::string& oslIncludePath);
+                  const std::string& oslIncludePath,
+                  const std::string& oslShaderPath);
     ~OslRenderView() = default;
 
     // Return the name of this render backend.

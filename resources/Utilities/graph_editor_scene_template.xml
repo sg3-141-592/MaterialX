@@ -1,0 +1,29 @@
+<!-- Template for a lit scene in testrender, used by the graph editor OSL preview.
+     %input_shader_type% is replaced with the name of the shader to render. -->
+<World>
+    <Camera eye="0,1.4,6" look_at="0,1,0" fov="30" />
+
+    <!-- Flat-ish grey backdrop behind the ball -->
+    <ShaderGroup name="backplane">
+        color Cs 0.5 0.5 0.5; shader matte layer1;
+    </ShaderGroup>
+    <Quad corner="-10,-4,-3" edge_x="20,0,0" edge_y="0,16,0" />
+
+    <!-- Key light, left, facing +x -->
+    <ShaderGroup name="emitterLeft" is_light="yes">
+        float power 400; shader emitter layer1
+    </ShaderGroup>
+    <Quad corner="-6,0,2" edge_x="0,0,-4" edge_y="0,4,0" />
+
+    <!-- Top light, facing down -->
+    <ShaderGroup name="emitterTop" is_light="yes">
+        float power 400; shader emitter layer1
+    </ShaderGroup>
+    <Quad corner="-2,8,-2" edge_x="4,0,0" edge_y="0,0,4" />
+
+    <!-- The ball -->
+    <ShaderGroup name="ball">
+        shader %input_shader_type% layer1;
+    </ShaderGroup>
+    <Sphere center="0,1,0" radius="1" />
+</World>

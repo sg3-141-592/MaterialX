@@ -36,7 +36,8 @@ OslRenderView::OslRenderView(mx::DocumentPtr doc,
                              int viewHeight,
                              const std::string& oslCompilerExecutable,
                              const std::string& oslTestRenderExecutable,
-                             const std::string& oslIncludePath) :
+                             const std::string& oslIncludePath,
+                             const std::string& oslShaderPath) :
     _document(doc),
     _stdLib(stdLib),
     _searchPath(searchPath),
@@ -72,6 +73,22 @@ OslRenderView::OslRenderView(mx::DocumentPtr doc,
     if (!oslIncludePath.empty())
     {
         _oslRenderer->setOslIncludePath(mx::FileSearchPath(oslIncludePath));
+    }
+
+    // Generated OSL shaders include the MaterialX support headers (e.g.
+    // mx_funcs.h), so ensure the genosl include folder is always on the OSL
+    // compiler include path.
+    mx::FilePath genOslIncludePath = searchPath.find("libraries/stdlib/genosl/include");
+    if (!genOslIncludePath.isEmpty() && genOslIncludePath.exists())
+    {
+        mx::FileSearchPath includePaths(oslIncludePath);
+        includePaths.append(genOslIncludePath);
+        _oslRenderer->setOslIncludePath(includePaths);
+    }
+
+    if (!oslShaderPath.empty())
+    {
+        _oslRenderer->setOslShaderSearchPath(mx::FileSearchPath(oslShaderPath));
     }
 
     setDocument(doc);
@@ -263,8 +280,8 @@ void OslRenderView::renderFrame()
     _oslRenderer->setOslShaderOutput(_shaderOutputName, _shaderOutputType);
 
     // Set the scene template file for testrender.
-    mx::FilePath sceneTemplatePath = searchPath.find("resources/Utilities/scene_template.xml");
-    if (sceneTemplatePath.isEmpty())
+    mx::FilePath sceneTemplatePath = searchPath.find("resources/Utilities/graph_editor_scene_template.xml");
+    if (sceneTemplatePath.isEmpty() || !sceneTemplatePath.exists())
     {
         std::cerr << "OSL scene template file not found on the search path" << std::endl;
         return;

@@ -117,7 +117,8 @@ class Graph
           const std::string& pinShape,
           const std::string& oslCompilerExecutable = mx::EMPTY_STRING,
           const std::string& oslTestRenderExecutable = mx::EMPTY_STRING,
-          const std::string& oslIncludePath = mx::EMPTY_STRING);
+          const std::string& oslIncludePath = mx::EMPTY_STRING,
+          const std::string& oslShaderPath = mx::EMPTY_STRING);
     ~Graph() = default;
 
     mx::DocumentPtr loadDocument(const mx::FilePath& filename);
@@ -369,6 +370,7 @@ class Graph
     std::string _oslCompilerExecutable;
     std::string _oslTestRenderExecutable;
     std::string _oslIncludePath;
+    std::string _oslShaderPath;
 
     mx::FileSearchPath _searchPath;
     mx::FilePathVec _libraryFolders;

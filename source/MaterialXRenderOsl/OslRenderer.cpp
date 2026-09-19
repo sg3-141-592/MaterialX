@@ -162,6 +162,10 @@ void OslRenderer::renderOSL(const FilePath& dirPath, const string& shaderName, c
     string osoPaths(_oslUtilityOSOPath);
     osoPaths += PATH_LIST_SEPARATOR + absDir.asString();
     osoPaths += PATH_LIST_SEPARATOR + absDir.getParentPath().asString();
+    for (const FilePath& shaderSearchPath : _oslShaderSearchPath)
+    {
+        osoPaths += PATH_LIST_SEPARATOR + shaderSearchPath.asString();
+    }
 
     // Build and run render command
     string command(_oslTestRenderExecutable);
@@ -292,6 +296,10 @@ void OslRenderer::renderOSLNetwork(const FilePath& dirPath, const string& shader
     osoPaths += PATH_LIST_SEPARATOR + _dataLibraryOSOPath.asString();
     osoPaths += PATH_LIST_SEPARATOR + absDir.asString();
     osoPaths += PATH_LIST_SEPARATOR + absDir.getParentPath().asString();
+    for (const FilePath& shaderSearchPath : _oslShaderSearchPath)
+    {
+        osoPaths += PATH_LIST_SEPARATOR + shaderSearchPath.asString();
+    }
 
     // Build and run render command
     string command(_oslTestRenderExecutable);
@@ -558,11 +566,20 @@ ImagePtr OslRenderer::captureImage(ImagePtr)
         throw ExceptionRenderError("Failed to read image: " + _oslOutputFileName.asString());
     }
 
+    // The rendered image is overwritten on disk each frame, so discard any
+    // cached copy to ensure the new pixels are loaded.
+    _imageHandler->clearImageCache();
+
     ImagePtr returnImage = _imageHandler->acquireImage(_oslOutputFileName);
     if (!returnImage)
     {
         throw ExceptionRenderError("Failed to save image to file: " + _oslOutputFileName.asString());
     }
+
+    // Upload the image to a render resource so that it can be displayed by the
+    // viewer. For the OpenGL image handler this creates and configures the
+    // texture that is later returned by Image::getResourceId().
+    _imageHandler->bindImage(returnImage, ImageSamplingProperties());
 
     return returnImage;
 }

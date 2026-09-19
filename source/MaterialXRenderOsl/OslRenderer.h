@@ -187,6 +187,15 @@ class MX_RENDEROSL_API OslRenderer : public ShaderRenderer
     {
         _oslUtilityOSOPath = dirPath;
     }
+
+    /// Set additional search paths for dependent shaders (.oso files) which are
+    /// used when rendering with testrender, e.g. the OSL distribution's shaders
+    /// directory containing built-in shaders such as "matte" and "emitter".
+    /// @param dirPaths Search paths to locations containing .oso files.
+    void setOslShaderSearchPath(const FileSearchPath& dirPaths)
+    {
+        _oslShaderSearchPath = dirPaths;
+    }
     void setDataLibraryOSOPath(const FilePath& dirPath)
     {
         _dataLibraryOSOPath = dirPath;
@@ -271,6 +280,7 @@ class MX_RENDEROSL_API OslRenderer : public ShaderRenderer
     string _oslShaderOutputName;
     string _oslShaderOutputType;
     FilePath _oslUtilityOSOPath;
+    FileSearchPath _oslShaderSearchPath;
     FilePath _dataLibraryOSOPath;
     bool _useTestRender;
     bool _useOSLCmdStr;

@@ -38,6 +38,7 @@ const std::string options =
     "    --oslOslc [FILENAME]           Specify the path to the OSL compiler (oslc) executable\n"
     "    --oslTestrender [FILENAME]     Specify the path to the OSL testrender executable\n"
     "    --oslIncludePath [PATH]        Specify the OSL include path (containing stdosl.h)\n"
+    "    --oslShaderPath [PATH]         Specify additional OSL shader search paths (containing .oso files) used by testrender\n"
     "    --pinsOnBorder [true|false]    Specify whether node pins should be drawn on the border of nodes (true) or inside the node (false).  Default is true.\n"
     "    --pinShape [circle|flow]       Specify the shape of node pins (circle, flow).  Default is circle.\n"
     "    --help                         Display the complete list of command-line options\n";
@@ -83,6 +84,7 @@ int main(int argc, char* const argv[])
     std::string oslCompilerExecutable;
     std::string oslTestRenderExecutable;
     std::string oslIncludePath;
+    std::string oslShaderPath;
     bool pinsOnBorder = true;
     std::string pinShape = "circle";
 
@@ -146,6 +148,10 @@ int main(int argc, char* const argv[])
         else if (token == "--oslIncludePath")
         {
             parseToken(nextToken, "string", oslIncludePath);
+        }
+        else if (token == "--oslShaderPath")
+        {
+            parseToken(nextToken, "string", oslShaderPath);
         }
         else if (token == "--pinsOnBorder")
         {
@@ -273,7 +279,8 @@ int main(int argc, char* const argv[])
                              pinShape,
                              oslCompilerExecutable,
                              oslTestRenderExecutable,
-                             oslIncludePath);
+                             oslIncludePath,
+                             oslShaderPath);
     if (!captureFilename.empty())
     {
         graph->getRenderer()->requestFrameCapture(captureFilename);
