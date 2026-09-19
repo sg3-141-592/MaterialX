@@ -74,11 +74,12 @@ class OslRenderView : public RenderViewBase
         return 1.0f;
     }
 
-    // Mouse and key events are not applicable to flat OSL rendering.
-    void setMouseButtonEvent(int button, bool down, mx::Vector2 pos) override { }
-    void setMouseMotionEvent(mx::Vector2 pos) override { }
-    void setKeyEvent(int key) override { }
-    void setScrollEvent(float scrollY) override { }
+    // Camera interaction: left-drag orbits, right/shift-left-drag pans and
+    // scroll or keypad +/- zoom. Camera changes trigger a debounced re-render.
+    void setMouseButtonEvent(int button, bool down, mx::Vector2 pos) override;
+    void setMouseMotionEvent(mx::Vector2 pos) override;
+    void setKeyEvent(int key) override;
+    void setScrollEvent(float scrollY) override;
 
     // Request a capture of the current frame, writing it to the given filename.
     void requestFrameCapture(const mx::FilePath& filename) override
@@ -114,6 +115,9 @@ class OslRenderView : public RenderViewBase
   private:
     void initContext(mx::GenContext& context);
     void renderFrame();
+    void markCameraDirty();
+    mx::Vector3 computeCameraEye() const;
+    mx::Vector3 computeCameraUp() const;
 
     // Document management
     mx::DocumentPtr _document;
@@ -133,9 +137,27 @@ class OslRenderView : public RenderViewBase
     std::string _shaderOutputName;
     std::string _shaderOutputType;
 
+    // Whether the constant background shader has been compiled for testrender.
+    bool _backgroundShaderCompiled = false;
+
     // Resource handlers
     mx::ImageHandlerPtr _imageHandler;
     mx::CameraPtr _viewCamera;
+
+    // Interactive camera state. The base camera matches the default scene
+    // template and is orbited by the arcball stored in _viewCamera.
+    mx::Vector3 _cameraPosition;
+    mx::Vector3 _cameraTarget;
+    mx::Vector3 _cameraUp;
+    float _cameraFov;
+    float _cameraZoom;
+    mx::Vector3 _userTranslation;
+    mx::Vector3 _userTranslationStart;
+    bool _userTranslationActive;
+    mx::Vector2 _userTranslationPixel;
+    bool _cameraDirty;
+    bool _cameraInteracting;
+    double _lastCameraChangeTime;
 
     // Render state
     unsigned int _textureID;

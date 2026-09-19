@@ -1,0 +1,9 @@
+// Constant-color background shader for the graph editor OSL preview.
+//
+// Used with testrender's <Background> element, which evaluates this shader only
+// for camera rays that miss scene geometry. It emits a background closure so
+// that it does not light the scene, unlike an emissive shader.
+shader graph_editor_background(color Cs = 0.5)
+{
+    Ci = Cs * background();
+}

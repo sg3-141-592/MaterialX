@@ -230,6 +230,28 @@ class MX_RENDEROSL_API OslRenderer : public ShaderRenderer
         _aaUnlit = aa;
     }
 
+    /// Set the testrender `-t N` value, the number of render threads.
+    /// @param threads Number of threads to use.
+    void setThreads(int threads)
+    {
+        _threads = threads;
+    }
+
+    /// Set the camera to use for the testrender scene. The values are used to
+    /// replace the %camera_eye%, %camera_look_at%, %camera_up% and
+    /// %camera_fov% tokens in the scene template.
+    /// @param eye Camera position.
+    /// @param lookAt Camera target point.
+    /// @param up Camera up vector.
+    /// @param fov Vertical field of view, in degrees.
+    void setCamera(const Vector3& eye, const Vector3& lookAt, const Vector3& up, float fov)
+    {
+        _cameraEye = eye;
+        _cameraLookAt = lookAt;
+        _cameraUp = up;
+        _cameraFov = fov;
+    }
+
     /// Set the osl command string that is to be tested
     void setOSLCmdStr(const string& oslCmd)
     {
@@ -286,7 +308,14 @@ class MX_RENDEROSL_API OslRenderer : public ShaderRenderer
     bool _useOSLCmdStr;
     int _aaLit;
     int _aaUnlit;
+    int _threads;
     string _oslCmdStr;
+
+    // Camera used for the testrender scene template.
+    Vector3 _cameraEye = Vector3(0.0f, 1.4f, 6.0f);
+    Vector3 _cameraLookAt = Vector3(0.0f, 1.0f, 0.0f);
+    Vector3 _cameraUp = Vector3(0.0f, 1.0f, 0.0f);
+    float _cameraFov = 30.0f;
 };
 
 MATERIALX_NAMESPACE_END

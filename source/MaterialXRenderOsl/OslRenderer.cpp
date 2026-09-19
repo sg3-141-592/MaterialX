@@ -14,6 +14,18 @@
 
 MATERIALX_NAMESPACE_BEGIN
 
+namespace
+{
+
+// Format a vector as a comma-separated string, as expected by the testrender
+// scene XML vector parser.
+string vectorToString(const Vector3& v)
+{
+    return std::to_string(v[0]) + "," + std::to_string(v[1]) + "," + std::to_string(v[2]);
+}
+
+} // namespace
+
 string OslRenderer::OSL_CLOSURE_COLOR_STRING("closure color");
 
 //
@@ -29,8 +41,9 @@ OslRenderer::OslRenderer(unsigned int width, unsigned int height, Image::BaseTyp
     ShaderRenderer(width, height, baseType),
     _useTestRender(true),
     _useOSLCmdStr(false),
-    _aaLit(1),
-    _aaUnlit(1)
+    _aaLit(2),
+    _aaUnlit(2),
+    _threads(8)
 {
 }
 
@@ -114,6 +127,10 @@ void OslRenderer::renderOSL(const FilePath& dirPath, const string& shaderName, c
     const string INPUT_SHADER_PARAMETER_OVERRIDES("%input_shader_parameter_overrides%");
     const string INPUT_SHADER_OUTPUT_STRING("%input_shader_output%");
     const string BACKGROUND_COLOR_STRING("%background_color%");
+    const string CAMERA_EYE_STRING("%camera_eye%");
+    const string CAMERA_LOOK_AT_STRING("%camera_look_at%");
+    const string CAMERA_UP_STRING("%camera_up%");
+    const string CAMERA_FOV_STRING("%camera_fov%");
 
     StringMap replacementMap;
     replacementMap[OUTPUT_SHADER_TYPE_STRING] = outputShader;
@@ -135,6 +152,10 @@ void OslRenderer::renderOSL(const FilePath& dirPath, const string& shaderName, c
     replacementMap[BACKGROUND_COLOR_STRING] = std::to_string(DEFAULT_SCREEN_COLOR_LIN_REC709[0]) + " " +
                                               std::to_string(DEFAULT_SCREEN_COLOR_LIN_REC709[1]) + " " +
                                               std::to_string(DEFAULT_SCREEN_COLOR_LIN_REC709[2]);
+    replacementMap[CAMERA_EYE_STRING] = vectorToString(_cameraEye);
+    replacementMap[CAMERA_LOOK_AT_STRING] = vectorToString(_cameraLookAt);
+    replacementMap[CAMERA_UP_STRING] = vectorToString(_cameraUp);
+    replacementMap[CAMERA_FOV_STRING] = std::to_string(_cameraFov);
     string sceneString = replaceSubstrings(sceneTemplateString, replacementMap);
     if ((sceneString == sceneTemplateString) || sceneTemplateString.empty())
     {
@@ -174,6 +195,7 @@ void OslRenderer::renderOSL(const FilePath& dirPath, const string& shaderName, c
     command += " -r " + std::to_string(_width) + " " + std::to_string(_height);
     command += " --path " + osoPaths;
     command += " -aa " + std::to_string(isColorClosure ? _aaLit : _aaUnlit);
+    command += " -t " + std::to_string(_threads);
     command += " > " + errorFile + redirectString;
 
     // Repeat the render command to allow for sporadic errors.
@@ -308,6 +330,7 @@ void OslRenderer::renderOSLNetwork(const FilePath& dirPath, const string& shader
     command += " -r " + std::to_string(_width) + " " + std::to_string(_height);
     command += " --path " + osoPaths;
     command += " -aa " + std::to_string(_aaLit);
+    command += " -t " + std::to_string(_threads);
     command += " > " + errorFile + redirectString;
 
     // Repeat the render command to allow for sporadic errors.

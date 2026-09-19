@@ -21,11 +21,17 @@
 
 #include <MaterialXFormat/Util.h>
 
+#include <imgui_impl_glfw.h>
+
+#include <cmath>
+#include <chrono>
 #include <iostream>
 
 //
 // OslRenderView methods
 //
+
+const float PI = std::acos(-1.0f);
 
 OslRenderView::OslRenderView(mx::DocumentPtr doc,
                              mx::DocumentPtr stdLib,
@@ -43,6 +49,15 @@ OslRenderView::OslRenderView(mx::DocumentPtr doc,
     _searchPath(searchPath),
     _genContext(mx::OslShaderGenerator::create()),
     _oslRenderer(mx::OslRenderer::create()),
+    _cameraPosition(0.0f, 1.4f, 6.0f),
+    _cameraTarget(0.0f, 1.0f, 0.0f),
+    _cameraUp(0.0f, 1.0f, 0.0f),
+    _cameraFov(30.0f),
+    _cameraZoom(1.0f),
+    _userTranslationActive(false),
+    _cameraDirty(false),
+    _cameraInteracting(false),
+    _lastCameraChangeTime(0.0),
     _textureID(0),
     _renderWidth(0),
     _renderHeight(0),
@@ -237,8 +252,34 @@ void OslRenderView::updateMaterials(mx::TypedElementPtr typedElem)
 
 void OslRenderView::drawContents()
 {
-    // OSL renders are expensive, so only re-render when the shader or the
-    // view size has changed since the last render.
+    // Camera changes are debounced because testrender runs synchronously and
+    // is expensive. While dragging we skip rendering entirely and settle on
+    // release; scroll and key zoom settle after a short idle period.
+    // Clear the interaction flag if the release event was missed (e.g. the
+    // button was released outside the viewport).
+    if (_cameraInteracting && !ImGui::IsMouseDown(0) && !ImGui::IsMouseDown(1))
+    {
+        _cameraInteracting = false;
+        _userTranslationActive = false;
+        _viewCamera->arcballButtonEvent(mx::Vector2(), false);
+        _cameraDirty = true;
+    }
+
+    if (_cameraDirty && !_cameraInteracting)
+    {
+        const double CAMERA_SETTLE_SECONDS = 0.2;
+        double now = std::chrono::duration<double>(
+                         std::chrono::steady_clock::now().time_since_epoch())
+                         .count();
+        if (now - _lastCameraChangeTime >= CAMERA_SETTLE_SECONDS)
+        {
+            _cameraDirty = false;
+            _renderDirty = true;
+        }
+    }
+
+    // OSL renders are expensive, so only re-render when the shader, the camera
+    // or the view size has changed since the last render.
     if (_renderDirty || _viewWidth != _renderWidth || _viewHeight != _renderHeight)
     {
         renderFrame();
@@ -279,6 +320,10 @@ void OslRenderView::renderFrame()
     _oslRenderer->setOslShaderName(_shaderName);
     _oslRenderer->setOslShaderOutput(_shaderOutputName, _shaderOutputType);
 
+    // Set the interactive camera for the scene template.
+    _oslRenderer->setCamera(computeCameraEye(), _cameraTarget + _userTranslation,
+                            computeCameraUp(), _cameraFov);
+
     // Set the scene template file for testrender.
     mx::FilePath sceneTemplatePath = searchPath.find("resources/Utilities/graph_editor_scene_template.xml");
     if (sceneTemplatePath.isEmpty() || !sceneTemplatePath.exists())
@@ -293,6 +338,29 @@ void OslRenderView::renderFrame()
     if (!shaderPath.isEmpty())
     {
         _oslRenderer->setOslUtilityOSOPath(shaderPath);
+    }
+
+    // Compile the constant background shader once. Its .oso is written to the
+    // OSL output folder, which is on testrender's search path.
+    if (!_backgroundShaderCompiled)
+    {
+        mx::FilePath backgroundPath = searchPath.find("resources/Utilities/graph_editor_background.osl");
+        if (!backgroundPath.isEmpty() && backgroundPath.exists())
+        {
+            try
+            {
+                _oslRenderer->compileOSL(backgroundPath);
+                _backgroundShaderCompiled = true;
+            }
+            catch (mx::ExceptionRenderError& e)
+            {
+                for (const std::string& error : e.errorLog())
+                {
+                    std::cerr << error << std::endl;
+                }
+                std::cerr << e.what() << std::endl;
+            }
+        }
     }
 
     // Record the OSL data library path from the shader, if present.
@@ -344,6 +412,108 @@ void OslRenderView::renderFrame()
     if (renderSucceeded)
     {
         std::cout << "OSL testrender took " << renderTimeMs << " ms" << std::endl;
+    }
+}
+
+void OslRenderView::markCameraDirty()
+{
+    _cameraDirty = true;
+    _lastCameraChangeTime = std::chrono::duration<double>(
+                                std::chrono::steady_clock::now().time_since_epoch())
+                                .count();
+}
+
+mx::Vector3 OslRenderView::computeCameraEye() const
+{
+    // The arcball stores the rotation that would be applied to the subject.
+    // Orbit the camera by its inverse around the subject centre to produce the
+    // same apparent rotation, then apply the dolly zoom and pan.
+    mx::Matrix44 invArcball = _viewCamera->arcballMatrix().getInverse();
+    mx::Vector3 offset = invArcball.transformVector(_cameraPosition - _cameraTarget);
+    offset = offset * (1.0f / _cameraZoom);
+    return _cameraTarget + offset + _userTranslation;
+}
+
+mx::Vector3 OslRenderView::computeCameraUp() const
+{
+    mx::Matrix44 invArcball = _viewCamera->arcballMatrix().getInverse();
+    return invArcball.transformVector(_cameraUp);
+}
+
+void OslRenderView::setMouseButtonEvent(int button, bool down, mx::Vector2 pos)
+{
+    if ((button == 0) && !ImGui::IsKeyPressed(ImGuiKey_RightShift) && !ImGui::IsKeyPressed(ImGuiKey_LeftShift))
+    {
+        _viewCamera->arcballButtonEvent(pos, down);
+        _cameraInteracting = down;
+    }
+    else if ((button == 1) || ((button == 0) && ImGui::IsKeyDown(ImGuiKey_RightShift)) || ((button == 0) && ImGui::IsKeyDown(ImGuiKey_LeftShift)))
+    {
+        _userTranslationStart = _userTranslation;
+        _userTranslationActive = true;
+        _userTranslationPixel = pos;
+        _cameraInteracting = down;
+    }
+    if ((button == 0) && !down)
+    {
+        _viewCamera->arcballButtonEvent(pos, false);
+    }
+    if (!down)
+    {
+        _userTranslationActive = false;
+        _cameraInteracting = false;
+
+        // Render immediately once the gesture ends.
+        _cameraDirty = false;
+        _renderDirty = true;
+    }
+}
+
+void OslRenderView::setMouseMotionEvent(mx::Vector2 pos)
+{
+    if (_viewCamera->applyArcballMotion(pos))
+    {
+        markCameraDirty();
+        return;
+    }
+
+    if (_userTranslationActive)
+    {
+        // Pan the camera in its own plane, scaled so that the subject tracks
+        // the cursor.
+        mx::Vector3 eye = computeCameraEye();
+        mx::Vector3 lookAt = _cameraTarget + _userTranslation;
+        mx::Vector3 forward = (lookAt - eye).getNormalized();
+        mx::Vector3 right = forward.cross(computeCameraUp()).getNormalized();
+        mx::Vector3 camUp = right.cross(forward).getNormalized();
+
+        float distance = (eye - lookAt).getMagnitude();
+        float panScale = 2.0f * distance * std::tan(_cameraFov * PI / 360.0f) /
+                         std::max(1.0f, (float) _viewHeight);
+        float dx = pos[0] - _userTranslationPixel[0];
+        float dy = pos[1] - _userTranslationPixel[1];
+        _userTranslation = _userTranslationStart + (camUp * dy - right * dx) * panScale;
+        markCameraDirty();
+    }
+}
+
+void OslRenderView::setScrollEvent(float scrollY)
+{
+    _cameraZoom = std::max(0.1f, _cameraZoom * ((scrollY > 0) ? 1.1f : 0.9f));
+    markCameraDirty();
+}
+
+void OslRenderView::setKeyEvent(int key)
+{
+    if (key == ImGuiKey_KeypadAdd)
+    {
+        _cameraZoom *= 1.1f;
+        markCameraDirty();
+    }
+    if (key == ImGuiKey_KeypadSubtract)
+    {
+        _cameraZoom = std::max(0.1f, _cameraZoom * 0.9f);
+        markCameraDirty();
     }
 }
 

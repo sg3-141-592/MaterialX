@@ -1,13 +1,17 @@
 <!-- Template for a lit scene in testrender, used by the graph editor OSL preview.
-     %input_shader_type% is replaced with the name of the shader to render. -->
+     %input_shader_type% is replaced with the name of the shader to render.
+     %camera_eye%, %camera_look_at%, %camera_up% and %camera_fov% are replaced
+     with the interactive camera state. -->
 <World>
-    <Camera eye="0,1.4,6" look_at="0,1,0" fov="30" />
+    <Camera eye="%camera_eye%" look_at="%camera_look_at%" up="%camera_up%" fov="%camera_fov%" />
 
-    <!-- Flat-ish grey backdrop behind the ball -->
-    <ShaderGroup name="backplane">
-        color Cs 0.5 0.5 0.5; shader matte layer1;
+    <!-- Camera-independent backdrop so the subject can be orbited freely.
+         testrender evaluates the background shader only for camera rays that
+         miss geometry, so it adds no occlusion or lighting cost. -->
+    <ShaderGroup name="backdrop">
+        color Cs 0.5 0.5 0.5; shader graph_editor_background layer1;
     </ShaderGroup>
-    <Quad corner="-10,-4,-3" edge_x="20,0,0" edge_y="0,16,0" />
+    <Background resolution="0" />
 
     <!-- Key light, left, facing +x -->
     <ShaderGroup name="emitterLeft" is_light="yes">
