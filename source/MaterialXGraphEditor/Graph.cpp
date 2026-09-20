@@ -8,6 +8,9 @@
 #ifdef MATERIALX_BUILD_GEN_OSL
 #include <MaterialXGraphEditor/OslRenderView.h>
 #endif
+#ifdef MATERIALX_BUILD_RENDER_CYCLES
+#include <MaterialXGraphEditor/CyclesRenderView.h>
+#endif
 
 #include <MaterialXRenderGlsl/External/Glad/glad.h>
 #include <MaterialXFormat/Util.h>
@@ -124,6 +127,9 @@ const std::vector<std::string> RENDER_BACKENDS = {
 #ifdef MATERIALX_BUILD_GEN_OSL
     , "OSL"
 #endif
+#ifdef MATERIALX_BUILD_RENDER_CYCLES
+    , "Cycles"
+#endif
 };
 
 } // anonymous namespace
@@ -232,6 +238,14 @@ void Graph::createRenderView(const std::string& backendName)
                                                          _viewWidth, _viewHeight,
                                                          _oslCompilerExecutable, _oslTestRenderExecutable,
                                                          _oslIncludePath, _oslShaderPath);
+        }
+#endif
+#ifdef MATERIALX_BUILD_RENDER_CYCLES
+        else if (backendName == "Cycles")
+        {
+            renderView = std::make_shared<CyclesRenderView>(_graphDoc, _stdLib, _meshFilename.asString(),
+                                                            _envRadianceFilename.asString(), _searchPath,
+                                                            _viewWidth, _viewHeight);
         }
 #endif
         else

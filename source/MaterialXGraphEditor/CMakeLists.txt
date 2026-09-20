@@ -84,6 +84,12 @@ if(MATERIALX_BUILD_GEN_OSL)
     list(APPEND MATERIALX_LIBRARIES MaterialXGenOsl MaterialXRenderOsl)
 endif()
 
+if(MATERIALX_BUILD_RENDER_CYCLES)
+    find_package(Cycles CONFIG REQUIRED)
+    list(APPEND MATERIALX_LIBRARIES Cycles::cycles)
+    target_compile_definitions(MaterialXGraphEditor PRIVATE MATERIALX_BUILD_RENDER_CYCLES)
+endif()
+
 if(APPLE)
     find_library(CORE_FOUNDATION Foundation REQUIRED)
     list(APPEND MATERIALX_LIBRARIES ${CORE_FOUNDATION})

@@ -129,6 +129,9 @@ class Graph
         return _renderer;
     }
 
+    // Set the active render backend, re-creating the render view as needed.
+    void setRenderBackend(const std::string& backendName);
+
   private:
     mx::ElementPredicate getElementPredicate() const;
     void loadStandardLibraries();
@@ -302,9 +305,6 @@ class Graph
     void loadGraphFromFile(bool prompt);
     void saveGraphToFile();
     void loadGeometry();
-
-    // Set the active render backend, re-creating the render view as needed.
-    void setRenderBackend(const std::string& backendName);
 
     // Create a render view for the given backend name.
     void createRenderView(const std::string& backendName);
