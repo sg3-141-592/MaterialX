@@ -14,6 +14,11 @@
 #include <MaterialXRender/TinyObjLoader.h>
 #include <MaterialXRender/Mesh.h>
 
+#include <MaterialXGenShader/DefaultColorManagementSystem.h>
+#include <MaterialXGenShader/Shader.h>
+#include <MaterialXGenShader/Util.h>
+#include <MaterialXFormat/Util.h>
+
 #include <imgui.h>
 
 #include "device/device.h"
@@ -22,6 +27,7 @@
 #include "scene/camera.h"
 #include "scene/mesh.h"
 #include "scene/object.h"
+#include "scene/osl.h"
 #include "scene/scene.h"
 #include "scene/shader.h"
 #include "scene/shader_graph.h"
@@ -29,12 +35,16 @@
 #include "session/buffers.h"
 #include "session/session.h"
 #include "util/math.h"
+#include "util/string.h"
 #include "util/transform.h"
 #include "util/types.h"
 
 #include <algorithm>
 #include <chrono>
 #include <cmath>
+#include <cstdio>
+#include <cstdlib>
+#include <fstream>
 #include <iostream>
 #include <mutex>
 #include <vector>
@@ -132,6 +142,7 @@ CyclesRenderView::CyclesRenderView(mx::DocumentPtr doc,
     _searchPath(searchPath),
     _meshFilename(meshFilename),
     _envRadianceFilename(envRadianceFilename),
+    _genContext(std::make_unique<mx::GenContext>(mx::OslShaderGenerator::create())),
     _cameraPosition(0.0f, 0.0f, 5.0f),
     _cameraTarget(0.0f, 0.0f, 0.0f),
     _cameraUp(0.0f, 1.0f, 0.0f),
@@ -148,6 +159,8 @@ CyclesRenderView::CyclesRenderView(mx::DocumentPtr doc,
     _envRadianceFilename = localSearchPath.find(_envRadianceFilename);
 
     _viewCamera = mx::Camera::create();
+
+    setDocument(doc);
 }
 
 CyclesRenderView::~CyclesRenderView()
@@ -173,6 +186,17 @@ void CyclesRenderView::initialize()
 
 void CyclesRenderView::buildScene()
 {
+#ifdef CYCLES_SHADER_DIR
+    // Cycles locates its OSL node shaders and stdcycles.h through
+    // path_get("shader"), which is derived from the host executable's path.
+    // Point it at the Cycles installation so that OSL shading works when
+    // embedded here.
+    if (getenv("CYCLES_SHADER_PATH") == nullptr)
+    {
+        setenv("CYCLES_SHADER_PATH", CYCLES_SHADER_DIR, 0);
+    }
+#endif
+
     const auto devices = ccl::Device::available_devices(ccl::DEVICE_MASK_CPU);
     if (devices.empty())
     {
@@ -187,10 +211,10 @@ void CyclesRenderView::buildScene()
     sessionParams.samples = 4096;
     sessionParams.use_auto_tile = false;
     sessionParams.use_resolution_divider = false;
-    sessionParams.shadingsystem = ccl::SHADINGSYSTEM_SVM;
+    sessionParams.shadingsystem = ccl::SHADINGSYSTEM_OSL;
 
     ccl::SceneParams sceneParams;
-    sceneParams.shadingsystem = ccl::SHADINGSYSTEM_SVM;
+    sceneParams.shadingsystem = ccl::SHADINGSYSTEM_OSL;
 
     _session = std::make_unique<ccl::Session>(sessionParams, sceneParams);
 
@@ -615,6 +639,13 @@ void CyclesRenderView::drawContents()
         _viewCamera->arcballButtonEvent(mx::Vector2(), false);
     }
 
+    // Rebuild the surface shader if the selected material changed.
+    if (_materialDirty)
+    {
+        _materialDirty = false;
+        rebuildMaterial();
+    }
+
     // Restart the progressive render when the camera or view size changed.
     if (_viewWidth != _sessionWidth || _viewHeight != _sessionHeight)
     {
@@ -670,16 +701,193 @@ void CyclesRenderView::drawContents()
 void CyclesRenderView::setDocument(mx::DocumentPtr document)
 {
     _document = document;
+    initContext(*_genContext);
+    _materialDirty = true;
 }
 
-void CyclesRenderView::updateMaterials(mx::TypedElementPtr /*typedElem*/)
+void CyclesRenderView::updateMaterials(mx::TypedElementPtr typedElem)
 {
-    // Material translation from MaterialX to Cycles is not implemented yet.
+    generateOsl(typedElem);
+    _materialDirty = true;
+}
+
+void CyclesRenderView::initContext(mx::GenContext& context)
+{
+    if (!_document)
+    {
+        return;
+    }
+
+    // Initialize search paths, including the folder holding the MaterialX OSL
+    // support headers (e.g. mx_funcs.h).
+    context.registerSourceCodeSearchPath(_searchPath);
+    mx::FilePath genOslIncludePath = _searchPath.find("libraries/stdlib/genosl/include");
+    if (!genOslIncludePath.isEmpty())
+    {
+        context.registerSourceCodeSearchPath(genOslIncludePath);
+    }
+
+    // Initialize unit management.
+    mx::UnitTypeDefPtr distanceTypeDef = _document->getUnitTypeDef("distance");
+    mx::LinearUnitConverterPtr distanceConverter = mx::LinearUnitConverter::create(distanceTypeDef);
+    mx::UnitConverterRegistryPtr unitRegistry = mx::UnitConverterRegistry::create();
+    unitRegistry->addUnitConverter(distanceTypeDef, distanceConverter);
+    mx::UnitTypeDefPtr angleTypeDef = _document->getUnitTypeDef("angle");
+    mx::LinearUnitConverterPtr angleConverter = mx::LinearUnitConverter::create(angleTypeDef);
+    unitRegistry->addUnitConverter(angleTypeDef, angleConverter);
+
+    // Initialize color management.
+    mx::ColorManagementSystemPtr cms = mx::DefaultColorManagementSystem::create(
+        context.getShaderGenerator().getTarget());
+    cms->loadLibrary(_document);
+    context.getShaderGenerator().setColorManagementSystem(cms);
+
+    // Initialize unit management.
+    mx::UnitSystemPtr unitSystem = mx::UnitSystem::create(context.getShaderGenerator().getTarget());
+    unitSystem->loadLibrary(_document);
+    unitSystem->setUnitConverterRegistry(unitRegistry);
+    context.getShaderGenerator().setUnitSystem(unitSystem);
+    context.getOptions().targetDistanceUnit = "meter";
+
+    // Register type definitions.
+    context.getShaderGenerator().registerTypeDefs(_document);
+}
+
+void CyclesRenderView::generateOsl(mx::TypedElementPtr typedElem)
+{
+    _oslSource.clear();
+    _oslOutputName.clear();
+
+    if (!_document)
+    {
+        return;
+    }
+
+    try
+    {
+        if (!typedElem)
+        {
+            std::vector<mx::TypedElementPtr> elements = mx::findRenderableElements(_document);
+            if (!elements.empty())
+            {
+                typedElem = elements[0];
+            }
+        }
+
+        // Skip material nodes without upstream shaders.
+        mx::NodePtr node = typedElem ? typedElem->asA<mx::Node>() : nullptr;
+        if (node && node->getCategory() == mx::SURFACE_MATERIAL_NODE_STRING &&
+            mx::getShaderNodes(node).empty())
+        {
+            typedElem = nullptr;
+        }
+
+        if (!typedElem)
+        {
+            return;
+        }
+
+        _genContext->clearUserData();
+        const std::string shaderName = typedElem->getNamePath();
+        mx::ShaderPtr shader = _genContext->getShaderGenerator().generate(
+            shaderName, typedElem, *_genContext);
+
+        const mx::ShaderStage& stage = shader->getStage(mx::Stage::PIXEL);
+        const mx::VariableBlock& outputs = stage.getOutputBlock(mx::OSL::OUTPUTS);
+        if (!outputs.empty())
+        {
+            _oslOutputName = outputs[0]->getVariable();
+            _oslSource = shader->getSourceCode(mx::Stage::PIXEL);
+        }
+    }
+    catch (mx::Exception& e)
+    {
+        std::cerr << "Cycles: failed to generate OSL shader: " << e.what() << std::endl;
+        _oslSource.clear();
+        _oslOutputName.clear();
+    }
+    catch (std::exception& e)
+    {
+        std::cerr << "Cycles: failed to generate OSL shader: " << e.what() << std::endl;
+        _oslSource.clear();
+        _oslOutputName.clear();
+    }
+}
+
+void CyclesRenderView::rebuildMaterial()
+{
+    if (!_session)
+    {
+        return;
+    }
+
+    ccl::Scene* scene = _session->scene.get();
+
+    if (_oslSource.empty())
+    {
+        // No valid material; keep the placeholder surface.
+        return;
+    }
+
+    // Write the generated OSL to a file that Cycles can compile. A fresh
+    // filename is used for each revision so that Cycles' shader cache does not
+    // return a stale result.
+    const mx::FilePath outputDir = mx::FilePath::getCurrentPath() / "CyclesRenderView";
+    outputDir.createDirectory(true);
+
+    // Remove generated shaders from previous revisions.
+    for (const mx::FilePath& existing : outputDir.getFilesInDirectory())
+    {
+        if (existing.getBaseName().rfind("material_", 0) == 0)
+        {
+            std::remove((outputDir / existing).asString().c_str());
+        }
+    }
+
+    const mx::FilePath oslPath = outputDir / ("material_" + std::to_string(_materialVersion++) + ".osl");
+
+    std::ofstream output(oslPath.asString());
+    if (!output)
+    {
+        std::cerr << "Cycles: failed to write OSL shader to " << oslPath.asString() << std::endl;
+        return;
+    }
+    output << _oslSource;
+    output.close();
+
+    auto graph = std::make_unique<ccl::ShaderGraph>();
+    ccl::OSLNode* oslNode = ccl::OSLShaderManager::osl_node(graph.get(), scene, oslPath.asString());
+    if (!oslNode)
+    {
+        std::cerr << "Cycles: failed to load OSL shader " << oslPath.asString() << std::endl;
+        return;
+    }
+
+    ccl::ShaderOutput* outputSocket = nullptr;
+    if (!_oslOutputName.empty())
+    {
+        outputSocket = oslNode->output(_oslOutputName.c_str());
+    }
+    if (!outputSocket && !oslNode->outputs.empty())
+    {
+        outputSocket = oslNode->outputs[0];
+    }
+    if (!outputSocket)
+    {
+        std::cerr << "Cycles: OSL shader has no usable output" << std::endl;
+        return;
+    }
+
+    graph->connect(outputSocket, graph->output()->input("Surface"));
+    scene->default_surface->set_graph(std::move(graph));
+    scene->default_surface->tag_update(scene);
+
+    restartRender();
 }
 
 void CyclesRenderView::loadMesh(const mx::FilePath& /*filename*/)
 {
-    // The Cycles render view currently renders a built-in sphere.
+    // The Cycles render view renders the geometry configured at construction.
 }
 
 bool CyclesRenderView::isNodeDefSupported(const mx::NodeDefPtr& /*nodeDef*/)

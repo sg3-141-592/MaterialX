@@ -359,6 +359,10 @@ int main(int argc, char* const argv[])
     }
 
     // Cleanup
+    // Destroy the graph (and its render views / render threads) while the
+    // OpenGL context is still current, then tear down ImGui and GLFW.
+    delete graph;
+    graph = nullptr;
     ImGui_ImplOpenGL3_Shutdown();
     ImGui_ImplGlfw_Shutdown();
     ImGui::DestroyContext();

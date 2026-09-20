@@ -12,6 +12,9 @@
 
 #include <MaterialXRender/GeometryHandler.h>
 
+#include <MaterialXGenShader/GenContext.h>
+#include <MaterialXGenOsl/OslShaderGenerator.h>
+
 #include "session/display_driver.h"
 
 #include <memory>
@@ -116,6 +119,9 @@ class CyclesRenderView : public RenderViewBase
     void modifyUniform(const std::string& name, mx::ValuePtr value) override;
 
   private:
+    void initContext(mx::GenContext& context);
+    void generateOsl(mx::TypedElementPtr typedElem);
+    void rebuildMaterial();
     void buildScene();
     bool buildMesh(ccl::Scene* scene);
     bool buildEnvironment(ccl::Scene* scene);
@@ -137,6 +143,13 @@ class CyclesRenderView : public RenderViewBase
     mx::FilePath _envRadianceFilename;
     mx::GeometryHandlerPtr _geometryHandler;
 
+    // MaterialX OSL shader generation.
+    std::unique_ptr<mx::GenContext> _genContext;
+    std::string _oslSource;
+    std::string _oslOutputName;
+    bool _materialDirty = false;
+    int _materialVersion = 0;
+
     // Cycles session and scene.
     std::unique_ptr<ccl::Session> _session;
     CyclesCaptureDisplayDriver* _displayDriver = nullptr;
@@ -152,7 +165,7 @@ class CyclesRenderView : public RenderViewBase
     mx::Vector3 _cameraPosition;
     mx::Vector3 _cameraTarget;
     mx::Vector3 _cameraUp;
-    float _cameraFov = 30.0f;
+    float _cameraFov = 45.0f;
     float _cameraZoom = 1.0f;
     mx::Vector3 _userTranslation;
     mx::Vector3 _userTranslationStart;

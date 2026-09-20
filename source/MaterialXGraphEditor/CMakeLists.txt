@@ -85,9 +85,14 @@ if(MATERIALX_BUILD_GEN_OSL)
 endif()
 
 if(MATERIALX_BUILD_RENDER_CYCLES)
+    if(NOT MATERIALX_BUILD_GEN_OSL)
+        message(FATAL_ERROR "The Cycles render backend requires MATERIALX_BUILD_GEN_OSL.")
+    endif()
     find_package(Cycles CONFIG REQUIRED)
-    list(APPEND MATERIALX_LIBRARIES Cycles::cycles)
-    target_compile_definitions(MaterialXGraphEditor PRIVATE MATERIALX_BUILD_RENDER_CYCLES)
+    list(APPEND MATERIALX_LIBRARIES MaterialXGenOsl MaterialXRenderOsl Cycles::cycles)
+    target_compile_definitions(MaterialXGraphEditor PRIVATE
+        MATERIALX_BUILD_RENDER_CYCLES
+        CYCLES_SHADER_DIR="${Cycles_SHADER_DIR}")
 endif()
 
 if(APPLE)
