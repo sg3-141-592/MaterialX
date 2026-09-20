@@ -30,6 +30,7 @@ class CyclesCaptureDisplayDriver;
 namespace ccl {
 class Session;
 class Scene;
+class Object;
 class SessionParams;
 class SceneParams;
 } // namespace ccl
@@ -153,6 +154,7 @@ class CyclesRenderView : public RenderViewBase
     // Cycles session and scene.
     std::unique_ptr<ccl::Session> _session;
     CyclesCaptureDisplayDriver* _displayDriver = nullptr;
+    ccl::Object* _object = nullptr;
 
     // Resource handlers.
     mx::ImageHandlerPtr _imageHandler;

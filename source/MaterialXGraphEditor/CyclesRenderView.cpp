@@ -417,6 +417,7 @@ bool CyclesRenderView::buildMesh(ccl::Scene* scene)
     ccl::Object* object = scene->create_node<ccl::Object>();
     object->set_geometry(cyclesMesh);
     object->set_tfm(ccl::transform_identity());
+    _object = object;
 
     return true;
 }
@@ -476,6 +477,7 @@ void CyclesRenderView::buildFallbackSphere(ccl::Scene* scene)
     ccl::Object* object = scene->create_node<ccl::Object>();
     object->set_geometry(mesh);
     object->set_tfm(ccl::transform_identity());
+    _object = object;
 }
 
 bool CyclesRenderView::buildEnvironment(ccl::Scene* scene)
@@ -540,21 +542,31 @@ void CyclesRenderView::updateCamera()
     camera->compute_auto_viewplane();
 
     const ccl::float3 eye = toFloat3(computeCameraEye());
-    const ccl::float3 target = toFloat3(_cameraTarget + _userTranslation);
+    const ccl::float3 target = toFloat3(_cameraTarget);
     const ccl::float3 upHint = toFloat3(computeCameraUp());
 
     const ccl::float3 forward = ccl::normalize(target - eye);
-    const ccl::float3 right = ccl::normalize(ccl::cross(upHint, forward));
-    const ccl::float3 up = ccl::cross(forward, right);
+    const ccl::float3 right = ccl::normalize(ccl::cross(forward, upHint));
+    const ccl::float3 up = ccl::cross(right, forward);
 
+    // Cycles stores the transform as rows, and applies it as a column-vector
+    // matrix, so the camera basis vectors go into the columns of the matrix.
     ccl::Transform matrix = ccl::transform_identity();
-    matrix.x = ccl::make_float4(right.x, right.y, right.z, eye.x);
-    matrix.y = ccl::make_float4(up.x, up.y, up.z, eye.y);
-    matrix.z = ccl::make_float4(forward.x, forward.y, forward.z, eye.z);
+    matrix.x = ccl::make_float4(right.x, up.x, forward.x, eye.x);
+    matrix.y = ccl::make_float4(right.y, up.y, forward.y, eye.y);
+    matrix.z = ccl::make_float4(right.z, up.z, forward.z, eye.z);
 
     camera->set_matrix(matrix);
     camera->need_flags_update = true;
     camera->need_device_update = true;
+
+    // Panning moves the model rather than the camera, so that orbiting keeps
+    // pivoting around the model center (matching the GLSL render view).
+    if (_object)
+    {
+        _object->set_tfm(ccl::transform_translate(toFloat3(_userTranslation)));
+        _object->tag_update(scene);
+    }
 }
 
 void CyclesRenderView::restartRender()
@@ -914,7 +926,7 @@ mx::Vector3 CyclesRenderView::computeCameraEye() const
     mx::Matrix44 invArcball = _viewCamera->arcballMatrix().getInverse();
     mx::Vector3 offset = invArcball.transformVector(_cameraPosition - _cameraTarget);
     offset = offset * (1.0f / _cameraZoom);
-    return _cameraTarget + offset + _userTranslation;
+    return _cameraTarget + offset;
 }
 
 mx::Vector3 CyclesRenderView::computeCameraUp() const
@@ -960,7 +972,7 @@ void CyclesRenderView::setMouseMotionEvent(mx::Vector2 pos)
     if (_userTranslationActive)
     {
         mx::Vector3 eye = computeCameraEye();
-        mx::Vector3 lookAt = _cameraTarget + _userTranslation;
+        mx::Vector3 lookAt = _cameraTarget;
         mx::Vector3 forward = (lookAt - eye).getNormalized();
         mx::Vector3 right = forward.cross(computeCameraUp()).getNormalized();
         mx::Vector3 camUp = right.cross(forward).getNormalized();
@@ -970,7 +982,7 @@ void CyclesRenderView::setMouseMotionEvent(mx::Vector2 pos)
                          std::max(1.0f, (float) _viewHeight);
         float dx = pos[0] - _userTranslationPixel[0];
         float dy = pos[1] - _userTranslationPixel[1];
-        _userTranslation = _userTranslationStart + (camUp * dy - right * dx) * panScale;
+        _userTranslation = _userTranslationStart + (right * dx - camUp * dy) * panScale;
         _cameraDirty = true;
     }
 }
