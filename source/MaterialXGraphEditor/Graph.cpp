@@ -262,12 +262,6 @@ void Graph::createRenderView(const std::string& backendName)
             _imageFilter.emplace_back("." + ext);
         }
 
-        _xincludeFiles.clear();
-        for (const std::string& incl : renderView->getXincludeFiles())
-        {
-            _xincludeFiles.insert(incl);
-        }
-
         _renderViews[backendName] = renderView;
     }
 
@@ -275,6 +269,11 @@ void Graph::createRenderView(const std::string& backendName)
 
     // Refresh the materials for the newly active backend.
     updateMaterials();
+
+    for (const std::string& incl : _renderer->getXincludeFiles())
+    {
+        _xincludeFiles.insert(incl);
+    }
 }
 
 mx::ElementPredicate Graph::getElementPredicate() const

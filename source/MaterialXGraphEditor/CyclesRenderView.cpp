@@ -119,6 +119,16 @@ namespace
 
 const double PI = std::acos(-1.0);
 
+// Delay before a property change is applied, so that continuous edits (e.g.
+// dragging a slider) only trigger a single OSL recompilation.
+const double MATERIAL_SETTLE_SECONDS = 0.5;
+
+double currentTimeSeconds()
+{
+    return std::chrono::duration<double>(std::chrono::steady_clock::now().time_since_epoch())
+        .count();
+}
+
 ccl::float3 toFloat3(const mx::Vector3& v)
 {
     return ccl::make_float3(v[0], v[1], v[2]);
@@ -651,11 +661,20 @@ void CyclesRenderView::drawContents()
         _viewCamera->arcballButtonEvent(mx::Vector2(), false);
     }
 
-    // Rebuild the surface shader if the selected material changed.
+    // Rebuild the surface shader if the selected material or a property
+    // changed. Structural changes are applied immediately; property edits are
+    // debounced so that continuous changes cause a single recompilation.
     if (_materialDirty)
     {
-        _materialDirty = false;
-        rebuildMaterial();
+        const bool ready = _materialImmediate ||
+                           (currentTimeSeconds() - _materialDirtyTime >= MATERIAL_SETTLE_SECONDS);
+        if (ready)
+        {
+            _materialDirty = false;
+            _materialImmediate = false;
+            generateOsl(_currentElement);
+            rebuildMaterial();
+        }
     }
 
     // Restart the progressive render when the camera or view size changed.
@@ -713,14 +732,31 @@ void CyclesRenderView::drawContents()
 void CyclesRenderView::setDocument(mx::DocumentPtr document)
 {
     _document = document;
+    _currentElement = nullptr;
     initContext(*_genContext);
     _materialDirty = true;
+    _materialImmediate = true;
+    _materialDirtyTime = currentTimeSeconds();
 }
 
 void CyclesRenderView::updateMaterials(mx::TypedElementPtr typedElem)
 {
-    generateOsl(typedElem);
+    if (!typedElem && _document)
+    {
+        const std::vector<mx::TypedElementPtr> elements = mx::findRenderableElements(_document);
+        if (!elements.empty())
+        {
+            typedElem = elements[0];
+        }
+    }
+
+    _currentElement = typedElem;
+
+    // Structural changes (material selection, graph edits) are applied on the
+    // next frame; only property/uniform edits are debounced.
     _materialDirty = true;
+    _materialImmediate = true;
+    _materialDirtyTime = currentTimeSeconds();
 }
 
 void CyclesRenderView::initContext(mx::GenContext& context)
@@ -909,7 +945,12 @@ bool CyclesRenderView::isNodeDefSupported(const mx::NodeDefPtr& /*nodeDef*/)
 
 void CyclesRenderView::modifyUniform(const std::string& /*name*/, mx::ValuePtr /*value*/)
 {
-    // Uniform editing through the Cycles pipeline is not yet supported.
+    // The graph editor has already written the new value into the document, so
+    // schedule a regeneration of the OSL shader. Regeneration is debounced so
+    // that dragging a slider triggers a single recompilation.
+    _materialDirty = true;
+    _materialImmediate = false;
+    _materialDirtyTime = currentTimeSeconds();
 }
 
 void CyclesRenderView::requestFrameCapture(const mx::FilePath& filename)

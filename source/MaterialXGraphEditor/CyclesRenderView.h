@@ -146,9 +146,12 @@ class CyclesRenderView : public RenderViewBase
 
     // MaterialX OSL shader generation.
     std::unique_ptr<mx::GenContext> _genContext;
+    mx::TypedElementPtr _currentElement;
     std::string _oslSource;
     std::string _oslOutputName;
     bool _materialDirty = false;
+    bool _materialImmediate = false;
+    double _materialDirtyTime = 0.0;
     int _materialVersion = 0;
 
     // Cycles session and scene.
