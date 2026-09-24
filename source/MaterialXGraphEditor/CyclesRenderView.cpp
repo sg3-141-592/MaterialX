@@ -796,6 +796,9 @@ bool CyclesRenderView::buildEnvironment(ccl::Scene* scene)
     // rays see the environment.
     const ccl::float3 screenColor = ccl::make_float3(0.3f, 0.3f, 0.32f);
 
+    _environmentBackground = nullptr;
+    _irradianceBackground = nullptr;
+
     // MaterialX lat-long environments are Y-up, while Cycles' equirectangular
     // projection is Z-up. Rotate the environment lookup so that the scene's +Y
     // up axis maps to the environment zenith, matching the GLSL render view.
@@ -816,26 +819,47 @@ bool CyclesRenderView::buildEnvironment(ccl::Scene* scene)
     bool hasEnvironment = !_envRadianceFilename.isEmpty() && _envRadianceFilename.exists();
     if (hasEnvironment)
     {
-        // Use the prefiltered irradiance map for the environment. The GLSL
-        // backend evaluates the sharp radiance map with filtered importance
-        // sampling (which pre-blurs it); sampling the raw radiance map in a
-        // path tracer instead produces colored speckles from small saturated
-        // regions of the HDR. The blurred irradiance map gives a closer, much
-        // cleaner match, and the sharp sun highlight comes from the light rig.
+        // Radiance map: sharp, used for specular/transmission rays so that
+        // reflective materials show the HDRI, matching the GLSL backend which
+        // reflects the radiance map for specular.
+        ccl::EnvironmentTextureNode* radiance = graph->create_node<ccl::EnvironmentTextureNode>();
+        radiance->set_filename(ccl::ustring(_envRadianceFilename.asString()));
+        radiance->set_tex_mapping_rotation(environmentRotation);
+        ccl::BackgroundNode* radianceBackground = graph->create_node<ccl::BackgroundNode>();
+        _environmentBackground = radianceBackground;
+        _baseEnvironmentStrength = 3.0f;
+        radianceBackground->set_strength(_baseEnvironmentStrength * _lightIntensity);
+        graph->connect(radiance->output("Color"), radianceBackground->input("Color"));
+
+        // Irradiance map: a cosine-weighted average, used for diffuse rays as
+        // the GLSL backend does for ambient diffuse. Its strength is boosted
+        // empirically because a prefiltered irradiance map under-lights when
+        // re-integrated over the hemisphere.
         mx::FilePath irradianceFilename = _envRadianceFilename.getParentPath() /
                                           "irradiance" / _envRadianceFilename.getBaseName();
-        const bool hasIrradiance = irradianceFilename.exists();
+        if (irradianceFilename.exists())
+        {
+            ccl::EnvironmentTextureNode* irradiance = graph->create_node<ccl::EnvironmentTextureNode>();
+            irradiance->set_filename(ccl::ustring(irradianceFilename.asString()));
+            irradiance->set_tex_mapping_rotation(environmentRotation);
+            ccl::BackgroundNode* irradianceBackground = graph->create_node<ccl::BackgroundNode>();
+            _irradianceBackground = irradianceBackground;
+            _baseIrradianceStrength = 6.0f;
+            irradianceBackground->set_strength(_baseIrradianceStrength * _lightIntensity);
+            graph->connect(irradiance->output("Color"), irradianceBackground->input("Color"));
 
-        ccl::EnvironmentTextureNode* environment = graph->create_node<ccl::EnvironmentTextureNode>();
-        environment->set_filename(ccl::ustring((hasIrradiance ? irradianceFilename : _envRadianceFilename).asString()));
-        environment->set_tex_mapping_rotation(environmentRotation);
-        ccl::BackgroundNode* environmentBackground = graph->create_node<ccl::BackgroundNode>();
-        environmentBackground->set_strength(hasIrradiance ? 6.0f : 1.5f);
-        _environmentBackground = environmentBackground;
-        _baseEnvironmentStrength = hasIrradiance ? 6.0f : 1.5f;
-        environmentBackground->set_strength(_baseEnvironmentStrength * _lightIntensity);
-        graph->connect(environment->output("Color"), environmentBackground->input("Color"));
-        graph->connect(environmentBackground->output("Background"), cameraMix->input("Closure1"));
+            // Diffuse rays see the irradiance map; all other indirect rays
+            // (glossy, reflection, transmission) see the sharp radiance map.
+            ccl::MixClosureNode* environmentMix = graph->create_node<ccl::MixClosureNode>();
+            graph->connect(lightPath->output("Is Diffuse Ray"), environmentMix->input("Fac"));
+            graph->connect(radianceBackground->output("Background"), environmentMix->input("Closure1"));
+            graph->connect(irradianceBackground->output("Background"), environmentMix->input("Closure2"));
+            graph->connect(environmentMix->output("Closure"), cameraMix->input("Closure1"));
+        }
+        else
+        {
+            graph->connect(radianceBackground->output("Background"), cameraMix->input("Closure1"));
+        }
     }
     else
     {
@@ -879,6 +903,11 @@ void CyclesRenderView::applyLightIntensity()
     if (_environmentBackground)
     {
         _environmentBackground->set_strength(_baseEnvironmentStrength * _lightIntensity);
+        scene->default_background->tag_update(scene);
+    }
+    if (_irradianceBackground)
+    {
+        _irradianceBackground->set_strength(_baseIrradianceStrength * _lightIntensity);
         scene->default_background->tag_update(scene);
     }
     for (size_t i = 0; i < _sunLights.size(); i++)

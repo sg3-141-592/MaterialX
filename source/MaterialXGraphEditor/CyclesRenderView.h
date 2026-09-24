@@ -223,9 +223,13 @@ class CyclesRenderView : public RenderViewBase
     std::vector<ccl::SunLight*> _sunLights;
     std::vector<float> _sunBaseIntensities;
 
-    // Environment background node and its unscaled strength, for live scaling.
+    // Environment background nodes, split by ray type: the sharp radiance map for
+    // specular/transmission rays and the blurred irradiance map for diffuse
+    // rays. Both are scaled live by the light-intensity multiplier.
     ccl::BackgroundNode* _environmentBackground = nullptr;
     float _baseEnvironmentStrength = 1.0f;
+    ccl::BackgroundNode* _irradianceBackground = nullptr;
+    float _baseIrradianceStrength = 1.0f;
 
     // Resource handlers.
     mx::ImageHandlerPtr _imageHandler;
