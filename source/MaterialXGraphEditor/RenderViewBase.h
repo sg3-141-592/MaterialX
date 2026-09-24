@@ -119,6 +119,16 @@ class RenderViewBase
     /// Update a uniform in the currently selected material.
     virtual void modifyUniform(const std::string& name, mx::ValuePtr value) = 0;
 
+    /// Set the render pass to display (e.g. "combined", "albedo"). Backends
+    /// that do not support multiple passes may ignore this.
+    virtual void setRenderPass(const std::string& /*name*/) { }
+
+    /// Return the name of the render pass currently being displayed.
+    virtual std::string getRenderPass() const
+    {
+        return "combined";
+    }
+
     /// Return true if a material compilation is in progress.
     bool getMaterialCompilation() const
     {

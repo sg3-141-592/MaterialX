@@ -212,9 +212,20 @@ void OslRenderView::updateMaterials(mx::TypedElementPtr typedElem)
 
         if (typedElem)
         {
+            mx::DocumentPtr genDoc = _document->copy();
+            mx::FileSearchPath sourceSearchPath = _searchPath;
+            sourceSearchPath.append(mx::getSourceSearchPath(_document));
+            mx::flattenFilenames(genDoc, sourceSearchPath);
+            mx::ElementPtr resolvedElem = genDoc->getDescendant(typedElem->getNamePath());
+            mx::TypedElementPtr genElem = resolvedElem ? resolvedElem->asA<mx::TypedElement>() : nullptr;
+            if (!genElem)
+            {
+                genElem = typedElem;
+            }
+
             // Generate the OSL shader for the selected element.
-            _shaderName = typedElem->getNamePath();
-            _shader = _genContext.getShaderGenerator().generate(_shaderName, typedElem, _genContext);
+            _shaderName = genElem->getNamePath();
+            _shader = _genContext.getShaderGenerator().generate(_shaderName, genElem, _genContext);
 
             // Determine the renderable output of the generated shader.
             const mx::ShaderStage& stage = _shader->getStage(mx::Stage::PIXEL);

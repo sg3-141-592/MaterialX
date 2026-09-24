@@ -132,6 +132,10 @@ class Graph
     // Set the active render backend, re-creating the render view as needed.
     void setRenderBackend(const std::string& backendName);
 
+    // Set the render pass displayed by the active backend (e.g. "combined",
+    // "albedo"). Backends that do not support passes ignore this.
+    void setRenderPass(const std::string& passName);
+
   private:
     mx::ElementPredicate getElementPredicate() const;
     void loadStandardLibraries();
@@ -365,6 +369,7 @@ class Graph
     mx::FilePath _envRadianceFilename;
     int _viewWidth = 0;
     int _viewHeight = 0;
+    std::string _renderPass = "combined";
 
     // OSL render backend initialization information
     std::string _oslCompilerExecutable;

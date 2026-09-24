@@ -36,6 +36,7 @@ const std::string options =
     "    --fontSize [SIZE]              Specify font size to use for the custom font.  If not specified a default of 18 will be used.\n"
     "    --captureFilename [FILENAME]   Specify the filename to which the first rendered frame should be written\n"
     "    --renderBackend [NAME]         Specify the initial render backend (e.g. GLSL, OSL, Cycles)\n"
+    "    --renderPass [NAME]            Specify the render pass to display (e.g. combined, albedo)\n"
     "    --previewWidth [WIDTH]         Specify the width for image previews\n"
     "    --oslOslc [FILENAME]           Specify the path to the OSL compiler (oslc) executable\n"
     "    --oslTestrender [FILENAME]     Specify the path to the OSL testrender executable\n"
@@ -84,6 +85,7 @@ int main(int argc, char* const argv[])
     float previewWidth = 256.0f;
     std::string captureFilename;
     std::string renderBackend;
+    std::string renderPass;
     std::string oslCompilerExecutable;
     std::string oslTestRenderExecutable;
     std::string oslIncludePath;
@@ -143,6 +145,10 @@ int main(int argc, char* const argv[])
         else if (token == "--renderBackend")
         {
             parseToken(nextToken, "string", renderBackend);
+        }
+        else if (token == "--renderPass")
+        {
+            parseToken(nextToken, "string", renderPass);
         }
         else if (token == "--oslOslc")
         {
@@ -291,6 +297,10 @@ int main(int argc, char* const argv[])
     if (!renderBackend.empty())
     {
         graph->setRenderBackend(renderBackend);
+    }
+    if (!renderPass.empty())
+    {
+        graph->setRenderPass(renderPass);
     }
     if (!captureFilename.empty())
     {

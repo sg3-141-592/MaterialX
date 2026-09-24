@@ -215,6 +215,15 @@ void Graph::setRenderBackend(const std::string& backendName)
     createRenderView(backendName);
 }
 
+void Graph::setRenderPass(const std::string& passName)
+{
+    _renderPass = passName;
+    if (_renderer)
+    {
+        _renderer->setRenderPass(passName);
+    }
+}
+
 void Graph::createRenderView(const std::string& backendName)
 {
     // Reuse an existing render view for this backend when available, so that
@@ -245,7 +254,7 @@ void Graph::createRenderView(const std::string& backendName)
         {
             renderView = std::make_shared<CyclesRenderView>(_graphDoc, _stdLib, _meshFilename.asString(),
                                                             _envRadianceFilename.asString(), _searchPath,
-                                                            _viewWidth, _viewHeight);
+                                                            _viewWidth, _viewHeight, _renderPass);
         }
 #endif
         else
@@ -266,6 +275,9 @@ void Graph::createRenderView(const std::string& backendName)
     }
 
     _renderer = _renderViews[backendName];
+
+    // Keep the render pass in sync when a cached render view is reused.
+    _renderer->setRenderPass(_renderPass);
 
     // Refresh the materials for the newly active backend.
     updateMaterials();
@@ -3301,6 +3313,19 @@ void Graph::graphButtons()
                     if (ImGui::MenuItem(backend.c_str(), nullptr, backend == activeBackend))
                     {
                         setRenderBackend(backend);
+                    }
+                }
+                ImGui::EndMenu();
+            }
+            if (ImGui::BeginMenu("Render Pass"))
+            {
+                const bool cyclesActive = _renderer && _renderer->getBackendName() == "Cycles";
+                for (const auto& pass : { std::make_pair("combined", "Combined"), std::make_pair("albedo", "Albedo") })
+                {
+                    const bool selected = _renderPass == pass.first;
+                    if (ImGui::MenuItem(pass.second, nullptr, selected, cyclesActive))
+                    {
+                        setRenderPass(pass.first);
                     }
                 }
                 ImGui::EndMenu();

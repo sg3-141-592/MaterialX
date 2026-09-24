@@ -50,7 +50,8 @@ class CyclesRenderView : public RenderViewBase
                      const std::string& envRadianceFilename,
                      const mx::FileSearchPath& searchPath,
                      int viewWidth,
-                     int viewHeight);
+                     int viewHeight,
+                     const std::string& renderPass = "combined");
     ~CyclesRenderView() override;
 
     // Return the name of this render backend.
@@ -119,6 +120,15 @@ class CyclesRenderView : public RenderViewBase
     // Update a uniform in the currently selected material.
     void modifyUniform(const std::string& name, mx::ValuePtr value) override;
 
+    // Set the render pass to display (e.g. "combined", "albedo").
+    void setRenderPass(const std::string& name) override;
+
+    // Return the render pass currently being displayed.
+    std::string getRenderPass() const override
+    {
+        return _renderPass;
+    }
+
   private:
     void initContext(mx::GenContext& context);
     void generateOsl(mx::TypedElementPtr typedElem);
@@ -127,6 +137,7 @@ class CyclesRenderView : public RenderViewBase
     bool buildMesh(ccl::Scene* scene);
     bool buildEnvironment(ccl::Scene* scene);
     void buildFallbackSphere(ccl::Scene* scene);
+    void applyDisplayPass(ccl::Scene* scene);
     void updateCamera();
     void restartRender();
     void uploadFrame(const std::vector<ccl::half4>& pixels, int width, int height);
@@ -158,6 +169,7 @@ class CyclesRenderView : public RenderViewBase
     std::unique_ptr<ccl::Session> _session;
     CyclesCaptureDisplayDriver* _displayDriver = nullptr;
     ccl::Object* _object = nullptr;
+    std::string _renderPass = "combined";
 
     // Resource handlers.
     mx::ImageHandlerPtr _imageHandler;
