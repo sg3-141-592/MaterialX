@@ -401,6 +401,16 @@ void CyclesRenderView::buildScene()
     _session->reset(sessionParams, bufferParams);
     _sessionWidth = _viewWidth;
     _sessionHeight = _viewHeight;
+
+    // Compile and apply the initial material before the session starts
+    // rendering. Otherwise the placeholder surface above (used only to keep the
+    // scene non-empty) would be displayed for the first frames, which the user
+    // sees as a flash of a gold sphere when first switching to this backend.
+    generateOsl(_currentElement);
+    rebuildMaterial();
+    _materialDirty = false;
+    _materialImmediate = false;
+
     _session->start();
 }
 
