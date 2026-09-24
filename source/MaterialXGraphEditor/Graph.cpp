@@ -278,6 +278,15 @@ void Graph::setMaxSamples(int samples)
     }
 }
 
+void Graph::setLightIntensity(float intensity)
+{
+    _lightIntensity = intensity;
+    if (_renderer)
+    {
+        _renderer->setLightIntensity(intensity);
+    }
+}
+
 void Graph::createRenderView(const std::string& backendName)
 {
     // Reuse an existing render view for this backend when available, so that
@@ -326,9 +335,25 @@ void Graph::createRenderView(const std::string& backendName)
         }
 
         _renderViews[backendName] = renderView;
+        _renderViewDocs[backendName] = _graphDoc;
+    }
+
+    // Deactivate the outgoing backend before switching, so asynchronous
+    // backends (e.g. Cycles) pause their render threads while not displayed.
+    if (_renderer && _renderer != _renderViews[backendName])
+    {
+        _renderer->setActive(false);
     }
 
     _renderer = _renderViews[backendName];
+
+    // Re-synchronize a cached view with the current document if a different
+    // file was loaded while this backend was inactive.
+    if (_renderViewDocs[backendName] != _graphDoc)
+    {
+        _renderer->setDocument(_graphDoc);
+        _renderViewDocs[backendName] = _graphDoc;
+    }
 
     // Keep the render pass in sync when a cached render view is reused.
     _renderer->setRenderPass(_renderPass);
@@ -338,13 +363,26 @@ void Graph::createRenderView(const std::string& backendName)
     _renderer->setAdaptiveThreshold(_adaptiveThreshold);
     _renderer->setAdaptiveMinSamples(_adaptiveMinSamples);
     _renderer->setMaxSamples(_maxSamples);
+    _renderer->setLightIntensity(_lightIntensity);
 
     // Refresh the materials for the newly active backend.
     updateMaterials();
 
+    // Activate the new backend, resuming/pausing asynchronous render threads.
+    _renderer->setActive(true);
+
     for (const std::string& incl : _renderer->getXincludeFiles())
     {
         _xincludeFiles.insert(incl);
+    }
+}
+
+void Graph::setDocumentForAllRenderViews()
+{
+    for (auto& entry : _renderViews)
+    {
+        entry.second->setDocument(_graphDoc);
+        _renderViewDocs[entry.first] = _graphDoc;
     }
 }
 
@@ -3243,7 +3281,7 @@ void Graph::clearGraph()
     _prevUiNode = nullptr;
     _currRenderNode = nullptr;
 
-    _renderer->setDocument(_graphDoc);
+    setDocumentForAllRenderViews();
     _renderer->updateMaterials(nullptr);
 }
 
@@ -3284,7 +3322,7 @@ void Graph::loadGraphFromFile(bool prompt)
     {
         _graphDoc = loadDocument(_materialFilename);
         initializeGraph();
-        _renderer->setDocument(_graphDoc);
+        setDocumentForAllRenderViews();
         _renderer->updateMaterials(nullptr);
     }
 }
@@ -3424,6 +3462,17 @@ void Graph::graphButtons()
                     setMaxSamples(_maxSamples);
                 }
 
+                ImGui::EndDisabled();
+                ImGui::EndMenu();
+            }
+            if (ImGui::BeginMenu("Lighting"))
+            {
+                const bool cyclesActive = _renderer && _renderer->getBackendName() == "Cycles";
+                ImGui::BeginDisabled(!cyclesActive);
+                if (ImGui::SliderFloat("Intensity", &_lightIntensity, 0.0f, 3.0f, "%.2f"))
+                {
+                    setLightIntensity(_lightIntensity);
+                }
                 ImGui::EndDisabled();
                 ImGui::EndMenu();
             }
@@ -5165,7 +5214,7 @@ void Graph::drawGraph(ImVec2 mousePos)
         _fileDialog.clearSelected();
         _graphDoc = loadDocument(_materialFilename);
         initializeGraph();
-        _renderer->setDocument(_graphDoc);
+        setDocumentForAllRenderViews();
         _renderer->updateMaterials(nullptr);
     }
 

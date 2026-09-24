@@ -145,6 +145,9 @@ class Graph
     void setAdaptiveMinSamples(int samples);
     void setMaxSamples(int samples);
 
+    // Set a multiplier for the Cycles direct lighting (light rig) intensity.
+    void setLightIntensity(float intensity);
+
   private:
     mx::ElementPredicate getElementPredicate() const;
     void loadStandardLibraries();
@@ -322,6 +325,10 @@ class Graph
     // Create a render view for the given backend name.
     void createRenderView(const std::string& backendName);
 
+    // Propagate the current document to every cached render view, so inactive
+    // backends do not render a stale document when they are reactivated.
+    void setDocumentForAllRenderViews();
+
     // Initialize the graph state from the current document.
     void initializeGraph();
 
@@ -368,6 +375,10 @@ class Graph
     // OpenGL resources are not torn down and rebuilt on every switch.
     std::unordered_map<std::string, RenderViewBasePtr> _renderViews;
 
+    // The document most recently given to each cached render view, so a view
+    // that was inactive while a new file was loaded can be re-synchronized.
+    std::unordered_map<std::string, mx::DocumentPtr> _renderViewDocs;
+
     // document and initializing information
     mx::FilePath _materialFilename;
     mx::DocumentPtr _graphDoc;
@@ -387,6 +398,7 @@ class Graph
     float _adaptiveThreshold = 0.01f;
     int _adaptiveMinSamples = 0;
     int _maxSamples = 4096;
+    float _lightIntensity = 0.75f;
 
     // OSL render backend initialization information
     std::string _oslCompilerExecutable;
