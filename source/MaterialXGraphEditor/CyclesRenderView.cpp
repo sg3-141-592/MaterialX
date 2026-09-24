@@ -25,6 +25,7 @@
 #include "scene/attribute.h"
 #include "scene/background.h"
 #include "scene/camera.h"
+#include "scene/integrator.h"
 #include "scene/mesh.h"
 #include "scene/object.h"
 #include "scene/osl.h"
@@ -335,11 +336,15 @@ void CyclesRenderView::buildScene()
         return;
     }
 
+    // The CPU denoiser is OpenImageDenoise. Disable denoising when this Cycles
+    // build was compiled without it.
+    _denoiseSupported = (devices.front().denoisers & ccl::DENOISER_OPENIMAGEDENOISE) != 0;
+
     ccl::SessionParams sessionParams;
     sessionParams.device = devices.front();
     sessionParams.background = false;
     sessionParams.headless = false;
-    sessionParams.samples = 4096;
+    sessionParams.samples = _maxSamples;
     sessionParams.use_auto_tile = false;
     sessionParams.use_resolution_divider = false;
     sessionParams.shadingsystem = ccl::SHADINGSYSTEM_OSL;
@@ -358,6 +363,9 @@ void CyclesRenderView::buildScene()
 
     // Select the pass shown in the viewport (and written to captures).
     applyDisplayPass(scene);
+
+    // Configure denoising and adaptive sampling before any samples are rendered.
+    applyRenderSettings(scene);
 
     // Build the mesh used by the GLSL render view when available, otherwise
     // fall back to a simple sphere so that there is always something to render.
@@ -683,6 +691,116 @@ void CyclesRenderView::applyDisplayPass(ccl::Scene* scene)
     scene->film->tag_modified();
 }
 
+void CyclesRenderView::applyRenderSettings(ccl::Scene* scene)
+{
+    ccl::Integrator* integrator = scene->integrator;
+
+    // Denoising only applies to the combined (beauty) image. Applying it while
+    // a data pass such as albedo is displayed produces an empty buffer, so
+    // scope it to the combined pass.
+    integrator->set_use_denoise(isDenoiseActive());
+    // Use OpenImageDenoise on the CPU so that denoising works on any machine,
+    // independent of GPU vendor support.
+    integrator->set_denoiser_type(ccl::DENOISER_OPENIMAGEDENOISE);
+    integrator->set_denoise_use_gpu(false);
+    integrator->set_denoise_start_sample(_denoiseStartSample);
+
+    integrator->set_use_adaptive_sampling(_adaptiveSampling);
+    integrator->set_adaptive_threshold(_adaptiveThreshold);
+    integrator->set_adaptive_min_samples(_adaptiveMinSamples);
+
+    integrator->tag_update(scene, ccl::Integrator::UPDATE_ALL);
+}
+
+bool CyclesRenderView::isDenoiseActive() const
+{
+    return _denoise && _denoiseSupported && _renderPass == "combined";
+}
+
+void CyclesRenderView::setDenoise(bool enabled)
+{
+    if (enabled == _denoise)
+    {
+        return;
+    }
+    _denoise = enabled;
+    if (_session)
+    {
+        applyRenderSettings(_session->scene.get());
+        restartRender();
+    }
+}
+
+void CyclesRenderView::setDenoiseStartSample(int samples)
+{
+    if (samples == _denoiseStartSample)
+    {
+        return;
+    }
+    _denoiseStartSample = samples;
+    if (_session)
+    {
+        applyRenderSettings(_session->scene.get());
+        restartRender();
+    }
+}
+
+void CyclesRenderView::setAdaptiveSampling(bool enabled)
+{
+    if (enabled == _adaptiveSampling)
+    {
+        return;
+    }
+    _adaptiveSampling = enabled;
+    if (_session)
+    {
+        applyRenderSettings(_session->scene.get());
+        restartRender();
+    }
+}
+
+void CyclesRenderView::setAdaptiveThreshold(float threshold)
+{
+    if (threshold == _adaptiveThreshold)
+    {
+        return;
+    }
+    _adaptiveThreshold = threshold;
+    if (_session)
+    {
+        applyRenderSettings(_session->scene.get());
+        restartRender();
+    }
+}
+
+void CyclesRenderView::setAdaptiveMinSamples(int samples)
+{
+    if (samples == _adaptiveMinSamples)
+    {
+        return;
+    }
+    _adaptiveMinSamples = samples;
+    if (_session)
+    {
+        applyRenderSettings(_session->scene.get());
+        restartRender();
+    }
+}
+
+void CyclesRenderView::setMaxSamples(int samples)
+{
+    if (samples == _maxSamples)
+    {
+        return;
+    }
+    _maxSamples = samples;
+    if (_session)
+    {
+        _session->set_samples(samples);
+        restartRender();
+    }
+}
+
 void CyclesRenderView::setRenderPass(const std::string& name)
 {
     if (name == _renderPass)
@@ -694,6 +812,8 @@ void CyclesRenderView::setRenderPass(const std::string& name)
     if (_session)
     {
         applyDisplayPass(_session->scene.get());
+        // Denoising is scoped to the combined pass, so re-apply the settings.
+        applyRenderSettings(_session->scene.get());
         restartRender();
     }
 }
@@ -861,11 +981,23 @@ void CyclesRenderView::drawContents()
     if (_captureRequested && _image)
     {
         // Cycles renders asynchronously: wait until the progressive render has
-        // accumulated samples before writing the captured frame.
+        // accumulated samples before writing the captured frame. When denoising
+        // is enabled, also wait for a denoised result so that captures are not
+        // written from a noisy frame. `get_current_sample()` reports the samples
+        // rendered in the single render tile, while `get_denoised_tiles()`
+        // becoming non-zero covers adaptive sampling that converges and
+        // denoises before the configured start sample is reached.
+        bool denoiseReady = true;
+        if (isDenoiseActive() && _session)
+        {
+            denoiseReady = _session->progress.get_current_sample() >= _denoiseStartSample ||
+                           _session->progress.get_denoised_tiles() > 0;
+        }
+
         const double now = std::chrono::duration<double>(
                                std::chrono::steady_clock::now().time_since_epoch())
                                .count();
-        if (now - _captureRequestTime >= 2.0)
+        if (denoiseReady && now - _captureRequestTime >= 2.0)
         {
             mx::ImagePtr saveImage = _image;
             if (_image->getBaseType() != mx::Image::BaseType::UINT8)

@@ -37,6 +37,12 @@ const std::string options =
     "    --captureFilename [FILENAME]   Specify the filename to which the first rendered frame should be written\n"
     "    --renderBackend [NAME]         Specify the initial render backend (e.g. GLSL, OSL, Cycles)\n"
     "    --renderPass [NAME]            Specify the render pass to display (e.g. combined, albedo)\n"
+    "    --denoise [true|false]         Enable the Cycles CPU denoiser (default true)\n"
+    "    --denoiseStartSample [N]       Number of samples to render before denoising begins (default 16)\n"
+    "    --adaptiveSampling [true|false] Enable adaptive (noise-threshold) sampling (default false)\n"
+    "    --adaptiveThreshold [VALUE]    Adaptive sampling noise threshold, lower is stricter (default 0.01)\n"
+    "    --adaptiveMinSamples [N]       Minimum samples for adaptive sampling (default 0, automatic)\n"
+    "    --samples [N]                  Maximum number of samples to render (default 4096)\n"
     "    --previewWidth [WIDTH]         Specify the width for image previews\n"
     "    --oslOslc [FILENAME]           Specify the path to the OSL compiler (oslc) executable\n"
     "    --oslTestrender [FILENAME]     Specify the path to the OSL testrender executable\n"
@@ -86,6 +92,12 @@ int main(int argc, char* const argv[])
     std::string captureFilename;
     std::string renderBackend;
     std::string renderPass;
+    bool denoise = true;
+    int denoiseStartSample = 16;
+    bool adaptiveSampling = false;
+    float adaptiveThreshold = 0.01f;
+    int adaptiveMinSamples = 0;
+    int maxSamples = 4096;
     std::string oslCompilerExecutable;
     std::string oslTestRenderExecutable;
     std::string oslIncludePath;
@@ -149,6 +161,30 @@ int main(int argc, char* const argv[])
         else if (token == "--renderPass")
         {
             parseToken(nextToken, "string", renderPass);
+        }
+        else if (token == "--denoise")
+        {
+            parseToken(nextToken, "boolean", denoise);
+        }
+        else if (token == "--denoiseStartSample")
+        {
+            parseToken(nextToken, "integer", denoiseStartSample);
+        }
+        else if (token == "--adaptiveSampling")
+        {
+            parseToken(nextToken, "boolean", adaptiveSampling);
+        }
+        else if (token == "--adaptiveThreshold")
+        {
+            parseToken(nextToken, "float", adaptiveThreshold);
+        }
+        else if (token == "--adaptiveMinSamples")
+        {
+            parseToken(nextToken, "integer", adaptiveMinSamples);
+        }
+        else if (token == "--samples")
+        {
+            parseToken(nextToken, "integer", maxSamples);
         }
         else if (token == "--oslOslc")
         {
@@ -302,6 +338,12 @@ int main(int argc, char* const argv[])
     {
         graph->setRenderPass(renderPass);
     }
+    graph->setDenoise(denoise);
+    graph->setDenoiseStartSample(denoiseStartSample);
+    graph->setAdaptiveSampling(adaptiveSampling);
+    graph->setAdaptiveThreshold(adaptiveThreshold);
+    graph->setAdaptiveMinSamples(adaptiveMinSamples);
+    graph->setMaxSamples(maxSamples);
     if (!captureFilename.empty())
     {
         graph->getRenderer()->requestFrameCapture(captureFilename);
@@ -347,13 +389,17 @@ int main(int argc, char* const argv[])
         renderer->drawContents();
         if (!captureFilename.empty())
         {
-            // Some render backends (e.g. Cycles) render asynchronously, so wait
-            // until a frame is available and give the renderer time to capture.
+            // Some render backends (e.g. Cycles) render asynchronously, so wait until a
+            // frame is available and the capture has actually been written. Cycles
+            // with denoising may need to reach its start sample first, so allow a
+            // generous timeout.
             const double now = std::chrono::duration<double>(
                                    std::chrono::steady_clock::now().time_since_epoch())
                                    .count();
-            if ((renderer->getRenderTextureId() != 0 && now - captureStart > 2.5) ||
-                now - captureStart > 30.0)
+            const bool captureComplete = renderer->isFrameCaptureComplete();
+            if ((renderer->getRenderTextureId() != 0 && captureComplete &&
+                 now - captureStart > 2.5) ||
+                now - captureStart > 120.0)
             {
                 break;
             }

@@ -88,6 +88,12 @@ class OslRenderView : public RenderViewBase
         _captureFilename = filename;
     }
 
+    // Return true once the requested frame capture has been written.
+    bool isFrameCaptureComplete() const override
+    {
+        return !_captureRequested;
+    }
+
     // Request that the viewer be closed after the next frame is rendered.
     void requestExit() override
     {

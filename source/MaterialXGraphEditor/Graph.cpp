@@ -224,6 +224,60 @@ void Graph::setRenderPass(const std::string& passName)
     }
 }
 
+void Graph::setDenoise(bool enabled)
+{
+    _denoise = enabled;
+    if (_renderer)
+    {
+        _renderer->setDenoise(enabled);
+    }
+}
+
+void Graph::setDenoiseStartSample(int samples)
+{
+    _denoiseStartSample = samples;
+    if (_renderer)
+    {
+        _renderer->setDenoiseStartSample(samples);
+    }
+}
+
+void Graph::setAdaptiveSampling(bool enabled)
+{
+    _adaptiveSampling = enabled;
+    if (_renderer)
+    {
+        _renderer->setAdaptiveSampling(enabled);
+    }
+}
+
+void Graph::setAdaptiveThreshold(float threshold)
+{
+    _adaptiveThreshold = threshold;
+    if (_renderer)
+    {
+        _renderer->setAdaptiveThreshold(threshold);
+    }
+}
+
+void Graph::setAdaptiveMinSamples(int samples)
+{
+    _adaptiveMinSamples = samples;
+    if (_renderer)
+    {
+        _renderer->setAdaptiveMinSamples(samples);
+    }
+}
+
+void Graph::setMaxSamples(int samples)
+{
+    _maxSamples = samples;
+    if (_renderer)
+    {
+        _renderer->setMaxSamples(samples);
+    }
+}
+
 void Graph::createRenderView(const std::string& backendName)
 {
     // Reuse an existing render view for this backend when available, so that
@@ -278,6 +332,12 @@ void Graph::createRenderView(const std::string& backendName)
 
     // Keep the render pass in sync when a cached render view is reused.
     _renderer->setRenderPass(_renderPass);
+    _renderer->setDenoise(_denoise);
+    _renderer->setDenoiseStartSample(_denoiseStartSample);
+    _renderer->setAdaptiveSampling(_adaptiveSampling);
+    _renderer->setAdaptiveThreshold(_adaptiveThreshold);
+    _renderer->setAdaptiveMinSamples(_adaptiveMinSamples);
+    _renderer->setMaxSamples(_maxSamples);
 
     // Refresh the materials for the newly active backend.
     updateMaterials();
@@ -3328,6 +3388,43 @@ void Graph::graphButtons()
                         setRenderPass(pass.first);
                     }
                 }
+                ImGui::EndMenu();
+            }
+            if (ImGui::BeginMenu("Denoising"))
+            {
+                const bool cyclesActive = _renderer && _renderer->getBackendName() == "Cycles";
+                ImGui::BeginDisabled(!cyclesActive);
+
+                if (ImGui::Checkbox("Enable Denoiser", &_denoise))
+                {
+                    setDenoise(_denoise);
+                }
+                if (ImGui::InputInt("Start Sample", &_denoiseStartSample))
+                {
+                    _denoiseStartSample = std::max(0, _denoiseStartSample);
+                    setDenoiseStartSample(_denoiseStartSample);
+                }
+                if (ImGui::Checkbox("Adaptive Sampling", &_adaptiveSampling))
+                {
+                    setAdaptiveSampling(_adaptiveSampling);
+                }
+                if (ImGui::InputFloat("Noise Threshold", &_adaptiveThreshold, 0.001f, 0.01f, "%.4f"))
+                {
+                    _adaptiveThreshold = std::max(0.0f, _adaptiveThreshold);
+                    setAdaptiveThreshold(_adaptiveThreshold);
+                }
+                if (ImGui::InputInt("Min Samples", &_adaptiveMinSamples))
+                {
+                    _adaptiveMinSamples = std::max(0, _adaptiveMinSamples);
+                    setAdaptiveMinSamples(_adaptiveMinSamples);
+                }
+                if (ImGui::InputInt("Max Samples", &_maxSamples))
+                {
+                    _maxSamples = std::max(1, _maxSamples);
+                    setMaxSamples(_maxSamples);
+                }
+
+                ImGui::EndDisabled();
                 ImGui::EndMenu();
             }
             ImGui::EndMenu();
