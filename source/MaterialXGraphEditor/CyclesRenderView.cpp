@@ -181,8 +181,16 @@ const char* CYCLES_ADDRESS_MODE_HELPER =
     "\n"
     "vector2 mx_cycles_wrap_uv(vector2 st, string uaddressmode, string vaddressmode)\n"
     "{\n"
-    "    return vector2(mx_cycles_address_component(st.x, uaddressmode),\n"
-    "                   mx_cycles_address_component(st.y, vaddressmode));\n"
+    "    vector2 wrapped = vector2(mx_cycles_address_component(st.x, uaddressmode),\n"
+    "                              mx_cycles_address_component(st.y, vaddressmode));\n"
+    "    // Cycles returns the missing color when a filtered sample falls just\n"
+    "    // outside [0, 1], so a coordinate of exactly 0 or 1 (produced by clamping\n"
+    "    // or wrapping) still samples black. Nudge exact boundaries inward to stay\n"
+    "    // within the filterable region.\n"
+    "    float edge_epsilon = 0.001;\n"
+    "    wrapped.x = (wrapped.x <= 0.0) ? edge_epsilon : ((wrapped.x >= 1.0) ? (1.0 - edge_epsilon) : wrapped.x);\n"
+    "    wrapped.y = (wrapped.y <= 0.0) ? edge_epsilon : ((wrapped.y >= 1.0) ? (1.0 - edge_epsilon) : wrapped.y);\n"
+    "    return wrapped;\n"
     "}\n";
 
 std::string remapUvForCycles(const std::string& source)
