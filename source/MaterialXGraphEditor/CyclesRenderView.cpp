@@ -1290,7 +1290,27 @@ void CyclesRenderView::drawContents()
             mx::ImagePtr saveImage = _image;
             if (_image->getBaseType() != mx::Image::BaseType::UINT8)
             {
-                saveImage = _image->copy(4, mx::Image::BaseType::UINT8);
+                // Convert the HDR float buffer to 8-bit for saving, clamping to
+                // [0, 1]. Image::setTexelColor does not clamp and casting an
+                // out-of-range float to uint8 wraps around, which turned bright
+                // highlights into colored (green) splotches in the saved PNG.
+                // The interactive preview samples the float texture directly and
+                // is clamped by the GPU, so it did not show the artifact.
+                saveImage = mx::Image::create(_image->getWidth(), _image->getHeight(), 4,
+                                              mx::Image::BaseType::UINT8);
+                saveImage->createResourceBuffer();
+                for (unsigned int y = 0; y < _image->getHeight(); y++)
+                {
+                    for (unsigned int x = 0; x < _image->getWidth(); x++)
+                    {
+                        mx::Color4 color = _image->getTexelColor(x, y);
+                        for (int c = 0; c < 4; c++)
+                        {
+                            color[c] = std::isfinite(color[c]) ? std::clamp(color[c], 0.0f, 1.0f) : 0.0f;
+                        }
+                        saveImage->setTexelColor(x, y, color);
+                    }
+                }
             }
             if (_imageHandler->saveImage(_captureFilename, saveImage, true))
             {
