@@ -146,63 +146,13 @@ const char* CYCLES_UV_HELPER =
     "    return vector2(uv.x, uv.y);\n"
     "}\n";
 
-// The MaterialX OSL image implementations pass their address modes to
-// texture() through the "swrap"/"twrap" options (see libraries/stdlib/genosl/
-// mx_image_*.osl). Cycles' OSL texture service ignores those options and
-// samples the image using its extension type, which for textures registered
-// through OSL defaults to EXTENSION_CLIP (see the Cycles sources
-// kernel/osl/services_shared.h and scene/image.h). Coordinates outside [0, 1]
-// therefore return the missing/black color, so any texture that tiles or
-// offsets its coordinates (e.g. a tiledimage with uvtiling, or place2d)
-// renders as black over most of a surface. OSL's own texture system, used by
-// testrender, honors the address modes, so this behavior only affects the
-// Cycles backend. Work around it by applying the address mode in the generated
-// OSL before sampling, keeping the coordinates passed to texture() within
-// [0, 1]. This is worth reporting upstream to the MaterialX and OpenShadingLanguage
-// projects: either Cycles should honor swrap/twrap, or the MaterialX OSL
-// images should not rely on texture() to perform wrapping.
-const char* CYCLES_ADDRESS_MODE_HELPER =
-    "float mx_cycles_address_component(float value, string addressmode)\n"
-    "{\n"
-    "    if (addressmode == \"periodic\")\n"
-    "    {\n"
-    "        return value - floor(value);\n"
-    "    }\n"
-    "    if (addressmode == \"mirror\")\n"
-    "    {\n"
-    "        float folded = fmod(abs(value), 2.0);\n"
-    "        return (folded > 1.0) ? (2.0 - folded) : folded;\n"
-    "    }\n"
-    "    if (addressmode == \"clamp\")\n"
-    "    {\n"
-    "        return clamp(value, 0.0, 1.0);\n"
-    "    }\n"
-    "    // \"constant\" (and unknown modes) are left unchanged; the generated\n"
-    "    // image functions already return their default color when a constant\n"
-    "    // coordinate lies outside [0, 1].\n"
-    "    return value;\n"
-    "}\n"
-    "\n"
-    "vector2 mx_cycles_wrap_uv(vector2 st, string uaddressmode, string vaddressmode)\n"
-    "{\n"
-    "    vector2 wrapped = vector2(mx_cycles_address_component(st.x, uaddressmode),\n"
-    "                              mx_cycles_address_component(st.y, vaddressmode));\n"
-    "    // Cycles returns the missing color when a filtered sample falls just\n"
-    "    // outside [0, 1], so a coordinate of exactly 0 or 1 (produced by clamping\n"
-    "    // or wrapping) still samples black. Nudge exact boundaries inward to stay\n"
-    "    // within the filterable region.\n"
-    "    float edge_epsilon = 0.001;\n"
-    "    wrapped.x = (wrapped.x <= 0.0) ? edge_epsilon : ((wrapped.x >= 1.0) ? (1.0 - edge_epsilon) : wrapped.x);\n"
-    "    wrapped.y = (wrapped.y <= 0.0) ? edge_epsilon : ((wrapped.y >= 1.0) ? (1.0 - edge_epsilon) : wrapped.y);\n"
-    "    return wrapped;\n"
-    "}\n"
-    "\n"
-    "// Cycles' OSL runtime does not bind the OSL dPdu/dPdv globals, so the\n"
-    "// MaterialX-generated tangent ('normalize(transform(space, dPdu))') is\n"
-    "// invalid. Anisotropic specular/coat lobes then produce invalid shading\n"
-    "// (visible as colored speckles). Use the Cycles UV tangent attribute\n"
-    "// ('geom:tangent') when available, falling back to a stable tangent derived\n"
-    "// from the shading normal.\n"
+// Cycles' OSL runtime does not bind the OSL dPdu/dPdv globals, so the
+// MaterialX-generated tangent ('normalize(transform(space, dPdu))') is
+// invalid. Anisotropic specular/coat lobes then produce invalid shading
+// (visible as colored speckles). Use the Cycles UV tangent attribute
+// ('geom:tangent') when available, falling back to a stable tangent derived
+// from the shading normal.
+const char* CYCLES_TANGENT_HELPER =
     "vector mx_cycles_tangent(string space)\n"
     "{\n"
     "    vector tangent = vector(0.0, 0.0, 0.0);\n"
@@ -217,7 +167,7 @@ const char* CYCLES_ADDRESS_MODE_HELPER =
     "    return normalize(tangent);\n"
     "}\n";
 
-std::string remapUvForCycles(const std::string& source)
+std::string customizeOslForCycles(const std::string& source)
 {
     std::string result = source;
 
@@ -236,7 +186,7 @@ std::string remapUvForCycles(const std::string& source)
         searchFrom = eol + 1;
     }
     result.insert(insertPos, std::string("\n") + CYCLES_UV_HELPER + "\n" +
-                                  CYCLES_ADDRESS_MODE_HELPER + "\n");
+                                  CYCLES_TANGENT_HELPER + "\n");
 
     auto replaceAll = [](std::string& text, const std::string& from, const std::string& to)
     {
@@ -250,15 +200,6 @@ std::string remapUvForCycles(const std::string& source)
 
     replaceAll(result, "vector2(u,v)", "mx_cycles_uv()");
     replaceAll(result, "vector(u,v,0)", "vector(mx_cycles_uv(), 0)");
-
-    // The image functions compute their sample coordinate through
-    // mx_transform_uv(texcoord) and then pass it to texture(); wrap it first.
-    // The hextiled image functions hardcode periodic addressing after scaling
-    // the coordinate by the tiling factor.
-    replaceAll(result, "mx_transform_uv(texcoord * tiling)",
-               "mx_cycles_wrap_uv(mx_transform_uv(texcoord * tiling), \"periodic\", \"periodic\")");
-    replaceAll(result, "mx_transform_uv(texcoord)",
-               "mx_cycles_wrap_uv(mx_transform_uv(texcoord), uaddressmode, vaddressmode)");
 
     // Replace the MaterialX tangent (which relies on the unbound OSL dPdu).
     replaceAll(result, "normalize(transform(geomprop_Tworld_space, dPdu))",
@@ -1461,7 +1402,7 @@ void CyclesRenderView::generateOsl(mx::TypedElementPtr typedElem)
         if (!outputs.empty())
         {
             _oslOutputName = outputs[0]->getVariable();
-            _oslSource = remapUvForCycles(shader->getSourceCode(mx::Stage::PIXEL));
+            _oslSource = customizeOslForCycles(shader->getSourceCode(mx::Stage::PIXEL));
         }
     }
     catch (mx::Exception& e)
