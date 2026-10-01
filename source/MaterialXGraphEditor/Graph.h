@@ -141,7 +141,7 @@ class Graph
     void setAdaptiveMinSamples(int samples);
     void setMaxSamples(int samples);
 
-    // Set a multiplier for the Cycles direct lighting (light rig) intensity.
+    // Set a multiplier for the Cycles environment lighting intensity.
     void setLightIntensity(float intensity);
 
     // Keep the render view size fixed at the values given on the command line

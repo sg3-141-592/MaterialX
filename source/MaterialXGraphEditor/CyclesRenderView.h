@@ -155,7 +155,7 @@ class CyclesRenderView : public RenderViewBase
     // Set the maximum number of samples rendered.
     void setMaxSamples(int samples) override;
 
-    // Set a multiplier for the direct lighting (light rig) intensity.
+    // Set a multiplier for the environment lighting intensity.
     void setLightIntensity(float intensity) override;
 
     // Pause/resume the Cycles session when this backend is deactivated/activated.
@@ -217,11 +217,8 @@ class CyclesRenderView : public RenderViewBase
     int _adaptiveMinSamples = 0;
     int _maxSamples = 4096;
 
-    // Direct lighting (sun light rig) intensity multiplier, and the sun lights
-    // created from the rig so the multiplier can be applied live.
+    // Environment lighting intensity multiplier.
     float _lightIntensity = 0.75f;
-    std::vector<ccl::Light*> _sunLights;
-    std::vector<float> _sunBaseIntensities;
 
     // Environment background nodes, split by ray type: the sharp radiance map for
     // specular/transmission rays and the blurred irradiance map for diffuse

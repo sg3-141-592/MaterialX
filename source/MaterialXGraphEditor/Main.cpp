@@ -43,7 +43,7 @@ const std::string options =
     "    --adaptiveThreshold [VALUE]    Adaptive sampling noise threshold, lower is stricter (default 0.01)\n"
     "    --adaptiveMinSamples [N]       Minimum samples for adaptive sampling (default 0, automatic)\n"
     "    --samples [N]                  Maximum number of samples to render (default 4096)\n"
-    "    --lightIntensity [FACTOR]      Cycles direct lighting (light rig) intensity multiplier (default 0.75)\n"
+    "    --lightIntensity [FACTOR]      Cycles environment lighting intensity multiplier (default 0.75)\n"
     "    --previewWidth [WIDTH]         Specify the width for image previews\n"
     "    --pinsOnBorder [true|false]    Specify whether node pins should be drawn on the border of nodes (true) or inside the node (false).  Default is true.\n"
     "    --pinShape [circle|flow]       Specify the shape of node pins (circle, flow).  Default is circle.\n"

@@ -13,12 +13,12 @@
 #include <MaterialXRender/CgltfLoader.h>
 #include <MaterialXRender/TinyObjLoader.h>
 #include <MaterialXRender/Mesh.h>
+#include <MaterialXRender/Util.h>
 
 #include <MaterialXGenShader/DefaultColorManagementSystem.h>
 #include <MaterialXGenShader/Shader.h>
 #include <MaterialXGenShader/Util.h>
 #include <MaterialXFormat/Util.h>
-#include <MaterialXFormat/XmlIo.h>
 
 #include <imgui.h>
 
@@ -27,7 +27,6 @@
 #include "scene/background.h"
 #include "scene/camera.h"
 #include "scene/integrator.h"
-#include "scene/light.h"
 #include "scene/mesh.h"
 #include "scene/object.h"
 #include "scene/osl.h"
@@ -205,6 +204,19 @@ std::string customizeOslForCycles(const std::string& source)
     replaceAll(result, "normalize(transform(geomprop_Tworld_space, dPdu))",
                "mx_cycles_tangent(geomprop_Tworld_space)");
 
+    // Cycles' OSL shading system does not implement the OSL standard library's
+    // anisotropic_vdf closure, which the generated open_pbr_surface uses for
+    // its transmission volume. An unsupported closure evaluates to empty and
+    // turns the whole material black. The transmission BSDF already provides
+    // the surface refraction for the preview, so map the VDF to an empty
+    // closure. This also avoids a division-by-zero in the albedo when
+    // transmission_depth is zero (extinction = absorption + scattering = 0).
+    // Worth reporting upstream: Cycles should register the standard-library
+    // VDF closures, or the MaterialX open_pbr_surface OSL implementation
+    // should not rely on them.
+    replaceAll(result, "anisotropic_vdf(albedo, extinction, anisotropy)",
+               "null_closure()");
+
     return result;
 }
 
@@ -225,126 +237,6 @@ ccl::PassType passTypeFromName(const std::string& name)
         return ccl::PASS_DIFFUSE_COLOR;
     }
     return ccl::PASS_COMBINED;
-}
-
-// A directional light read from a MaterialX light rig, matching the setup used
-// by the GLSL render view.
-struct DirectionalLightRig
-{
-    ccl::float3 direction;
-    ccl::float3 color;
-    float intensity;
-};
-
-// Read the light rig associated with the environment map (e.g.
-// san_giuseppe_bridge_split.mtlx), returning its directional lights. The GLSL
-// render view loads the same file in GlslRenderView::loadEnvironmentLight.
-std::vector<DirectionalLightRig> loadLightRig(const mx::FileSearchPath& searchPath,
-                                              const mx::FilePath& envRadianceFilename)
-{
-    std::vector<DirectionalLightRig> lights;
-    if (envRadianceFilename.isEmpty())
-    {
-        return lights;
-    }
-
-    mx::FilePath rigFilename = envRadianceFilename;
-    rigFilename.removeExtension();
-    rigFilename.addExtension(mx::MTLX_EXTENSION);
-    rigFilename = searchPath.find(rigFilename);
-    if (rigFilename.isEmpty() || !rigFilename.exists())
-    {
-        return lights;
-    }
-
-    try
-    {
-        mx::DocumentPtr rig = mx::createDocument();
-        mx::readFromXmlFile(rig, rigFilename, searchPath);
-        for (mx::NodePtr node : rig->getNodes())
-        {
-            if (node->getCategory() != "directional_light")
-            {
-                continue;
-            }
-
-            DirectionalLightRig rigLight = { ccl::make_float3(0.0f, -1.0f, 0.0f),
-                                             ccl::make_float3(1.0f, 1.0f, 1.0f), 1.0f };
-            if (mx::InputPtr input = node->getInput("direction"))
-            {
-                if (input->getValue())
-                {
-                    rigLight.direction = toFloat3(input->getValue()->asA<mx::Vector3>());
-                }
-            }
-            if (mx::InputPtr input = node->getInput("color"))
-            {
-                if (input->getValue())
-                {
-                    rigLight.color = toFloat3(input->getValue()->asA<mx::Color3>());
-                }
-            }
-            if (mx::InputPtr input = node->getInput("intensity"))
-            {
-                if (input->getValue())
-                {
-                    rigLight.intensity = input->getValue()->asA<float>();
-                }
-            }
-            lights.push_back(rigLight);
-        }
-    }
-    catch (std::exception& e)
-    {
-        std::cerr << "Cycles: failed to read light rig: " << e.what() << std::endl;
-    }
-
-    return lights;
-}
-
-// Add a MaterialX directional light as a Cycles sun light. The sun travels
-// along the object's local +Z axis, so the light direction is placed in the
-// third column of the transform.
-ccl::Light* addDirectionalLight(ccl::Scene* scene, const DirectionalLightRig& rig, float intensityScale)
-{
-    ccl::float3 forward = ccl::normalize(-rig.direction);
-    ccl::float3 upHint = ccl::make_float3(0.0f, 1.0f, 0.0f);
-    if (std::fabs(ccl::dot(forward, upHint)) > 0.999f)
-    {
-        upHint = ccl::make_float3(0.0f, 0.0f, 1.0f);
-    }
-    const ccl::float3 right = ccl::normalize(ccl::cross(forward, upHint));
-    const ccl::float3 up = ccl::cross(right, forward);
-
-    ccl::Light* sun = scene->create_node<ccl::Light>();
-    // Cycles 5.1 models the sun as a distant light with an angular diameter.
-    sun->set_light_type(ccl::LIGHT_DISTANT);
-    sun->set_angle(0.00918f);
-    const float intensity = rig.intensity * intensityScale;
-    sun->set_strength(ccl::make_float3(intensity, intensity, intensity));
-
-    auto lightGraph = std::make_unique<ccl::ShaderGraph>();
-    ccl::EmissionNode* emission = lightGraph->create_node<ccl::EmissionNode>();
-    emission->set_color(rig.color);
-    emission->set_strength(1.0f);
-    lightGraph->connect(emission->output("Emission"), lightGraph->output()->input("Surface"));
-    ccl::Shader* shader = scene->create_node<ccl::Shader>();
-    shader->set_graph(std::move(lightGraph));
-    ccl::array<ccl::Node*> usedShaders;
-    usedShaders.push_back_slow(shader);
-    sun->set_used_shaders(usedShaders);
-
-    ccl::Transform tfm = ccl::transform_identity();
-    tfm.x = ccl::make_float4(right.x, up.x, forward.x, 0.0f);
-    tfm.y = ccl::make_float4(right.y, up.y, forward.y, 0.0f);
-    tfm.z = ccl::make_float4(right.z, up.z, forward.z, 0.0f);
-
-    ccl::Object* lightObject = scene->create_node<ccl::Object>();
-    lightObject->set_tfm(tfm);
-    lightObject->set_visibility(ccl::PATH_RAY_ALL_VISIBILITY & ~ccl::PATH_RAY_CAMERA);
-    lightObject->set_geometry(sun);
-
-    return sun;
 }
 
 } // anonymous namespace
@@ -737,7 +629,7 @@ bool CyclesRenderView::buildEnvironment(ccl::Scene* scene)
     // uses the environment only for lighting. Replicate that: the background
     // visible to camera rays is the screen color, while shadow and indirect
     // rays see the environment.
-    const ccl::float3 screenColor = ccl::make_float3(0.3f, 0.3f, 0.32f);
+    const ccl::float3 screenColor = toFloat3(mx::DEFAULT_SCREEN_COLOR_LIN_REC709);
 
     _environmentBackground = nullptr;
     _irradianceBackground = nullptr;
@@ -819,19 +711,6 @@ bool CyclesRenderView::buildEnvironment(ccl::Scene* scene)
     scene->default_background->set_graph(std::move(graph));
     scene->default_background->tag_update(scene);
 
-    // Add the directional key light(s) from the MaterialX light rig, matching
-    // GlslRenderView::applyDirectLights.
-    _sunLights.clear();
-    _sunBaseIntensities.clear();
-    for (const DirectionalLightRig& rig : loadLightRig(_searchPath, _envRadianceFilename))
-    {
-        if (ccl::Light* sun = addDirectionalLight(scene, rig, _lightIntensity))
-        {
-            _sunLights.push_back(sun);
-            _sunBaseIntensities.push_back(rig.intensity);
-        }
-    }
-
     return hasEnvironment;
 }
 
@@ -852,12 +731,6 @@ void CyclesRenderView::applyLightIntensity()
     {
         _irradianceBackground->set_strength(_baseIrradianceStrength * _lightIntensity);
         scene->default_background->tag_update(scene);
-    }
-    for (size_t i = 0; i < _sunLights.size(); i++)
-    {
-        const float intensity = _sunBaseIntensities[i] * _lightIntensity;
-        _sunLights[i]->set_strength(ccl::make_float3(intensity, intensity, intensity));
-        _sunLights[i]->tag_update(scene);
     }
     restartRender();
 }
