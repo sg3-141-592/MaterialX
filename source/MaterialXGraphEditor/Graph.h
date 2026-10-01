@@ -144,6 +144,14 @@ class Graph
     // Set a multiplier for the Cycles direct lighting (light rig) intensity.
     void setLightIntensity(float intensity);
 
+    // Keep the render view size fixed at the values given on the command line
+    // instead of resizing it to the render pane every frame. Used when
+    // capturing frames headlessly so captures honor the requested resolution.
+    void setFixedSizeRendering(bool enabled)
+    {
+        _fixedSizeRendering = enabled;
+    }
+
   private:
     mx::ElementPredicate getElementPredicate() const;
     void loadStandardLibraries();
@@ -395,6 +403,7 @@ class Graph
     int _adaptiveMinSamples = 0;
     int _maxSamples = 4096;
     float _lightIntensity = 0.75f;
+    bool _fixedSizeRendering = false;
 
     mx::FileSearchPath _searchPath;
     mx::FilePathVec _libraryFolders;

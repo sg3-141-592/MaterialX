@@ -325,6 +325,8 @@ int main(int argc, char* const argv[])
     graph->setLightIntensity(lightIntensity);
     if (!captureFilename.empty())
     {
+        // Keep the render view at the requested resolution while capturing.
+        graph->setFixedSizeRendering(true);
         graph->getRenderer()->requestFrameCapture(captureFilename);
         graph->getRenderer()->requestExit();
     }
