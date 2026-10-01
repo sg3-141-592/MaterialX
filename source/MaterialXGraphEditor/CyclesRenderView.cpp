@@ -1239,6 +1239,12 @@ void CyclesRenderView::drawContents()
                 // highlights into colored (green) splotches in the saved PNG.
                 // The interactive preview samples the float texture directly and
                 // is clamped by the GPU, so it did not show the artifact.
+                //
+                // The buffer is scene-linear, while 8-bit formats such as PNG
+                // are display-referred: encode the RGB channels to sRGB so the
+                // capture matches the on-screen preview and the GLSL backend,
+                // whose readback returns sRGB-encoded bytes. Alpha is linear
+                // and is left untouched.
                 saveImage = mx::Image::create(_image->getWidth(), _image->getHeight(), 4,
                                               mx::Image::BaseType::UINT8);
                 saveImage->createResourceBuffer();
@@ -1251,6 +1257,10 @@ void CyclesRenderView::drawContents()
                         {
                             color[c] = std::isfinite(color[c]) ? std::clamp(color[c], 0.0f, 1.0f) : 0.0f;
                         }
+                        const mx::Color3 srgb = mx::Color3(color[0], color[1], color[2]).linearToSrgb();
+                        color[0] = srgb[0];
+                        color[1] = srgb[1];
+                        color[2] = srgb[2];
                         saveImage->setTexelColor(x, y, color);
                     }
                 }
