@@ -5,9 +5,6 @@
 
 #include <MaterialXGraphEditor/Graph.h>
 #include <MaterialXGraphEditor/GlslRenderView.h>
-#ifdef MATERIALX_BUILD_GEN_OSL
-#include <MaterialXGraphEditor/OslRenderView.h>
-#endif
 #ifdef MATERIALX_BUILD_RENDER_CYCLES
 #include <MaterialXGraphEditor/CyclesRenderView.h>
 #endif
@@ -124,9 +121,6 @@ static float getUiScaleFromFont()
 // The set of render backends that can be selected from the Viewer menu.
 const std::vector<std::string> RENDER_BACKENDS = {
     "GLSL"
-#ifdef MATERIALX_BUILD_GEN_OSL
-    , "OSL"
-#endif
 #ifdef MATERIALX_BUILD_RENDER_CYCLES
     , "Cycles"
 #endif
@@ -146,11 +140,7 @@ Graph::Graph(const std::string& materialFilename,
              int viewHeight,
              float previewWidth,
              bool pinsOnBorder,
-             const std::string& pinShape,
-             const std::string& oslCompilerExecutable,
-             const std::string& oslTestRenderExecutable,
-             const std::string& oslIncludePath,
-             const std::string& oslShaderPath) :
+             const std::string& pinShape) :
     _materialFilename(materialFilename),
     _searchPath(searchPath),
     _libraryFolders(libraryFolders),
@@ -195,12 +185,6 @@ Graph::Graph(const std::string& materialFilename,
     _envRadianceFilename = "resources/Lights/san_giuseppe_bridge_split.hdr";
     _viewWidth = viewWidth;
     _viewHeight = viewHeight;
-
-    // Store the OSL render backend initialization information.
-    _oslCompilerExecutable = oslCompilerExecutable;
-    _oslTestRenderExecutable = oslTestRenderExecutable;
-    _oslIncludePath = oslIncludePath;
-    _oslShaderPath = oslShaderPath;
 
     // Create the initial render view.
     createRenderView("GLSL");
@@ -302,16 +286,6 @@ void Graph::createRenderView(const std::string& backendName)
                                                           _envRadianceFilename.asString(), _searchPath,
                                                           _viewWidth, _viewHeight);
         }
-#ifdef MATERIALX_BUILD_GEN_OSL
-        else if (backendName == "OSL")
-        {
-            renderView = std::make_shared<OslRenderView>(_graphDoc, _stdLib, _meshFilename.asString(),
-                                                         _envRadianceFilename.asString(), _searchPath,
-                                                         _viewWidth, _viewHeight,
-                                                         _oslCompilerExecutable, _oslTestRenderExecutable,
-                                                         _oslIncludePath, _oslShaderPath);
-        }
-#endif
 #ifdef MATERIALX_BUILD_RENDER_CYCLES
         else if (backendName == "Cycles")
         {

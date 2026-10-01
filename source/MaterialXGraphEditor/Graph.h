@@ -114,11 +114,7 @@ class Graph
           int viewHeight,
           float previewWidth,
           bool pinsOnBorder,
-          const std::string& pinShape,
-          const std::string& oslCompilerExecutable = mx::EMPTY_STRING,
-          const std::string& oslTestRenderExecutable = mx::EMPTY_STRING,
-          const std::string& oslIncludePath = mx::EMPTY_STRING,
-          const std::string& oslShaderPath = mx::EMPTY_STRING);
+          const std::string& pinShape);
     ~Graph() = default;
 
     mx::DocumentPtr loadDocument(const mx::FilePath& filename);
@@ -399,12 +395,6 @@ class Graph
     int _adaptiveMinSamples = 0;
     int _maxSamples = 4096;
     float _lightIntensity = 0.75f;
-
-    // OSL render backend initialization information
-    std::string _oslCompilerExecutable;
-    std::string _oslTestRenderExecutable;
-    std::string _oslIncludePath;
-    std::string _oslShaderPath;
 
     mx::FileSearchPath _searchPath;
     mx::FilePathVec _libraryFolders;

@@ -80,10 +80,6 @@ set(MATERIALX_LIBRARIES
     MaterialXGenGlsl
     MaterialXRenderGlsl)
 
-if(MATERIALX_BUILD_GEN_OSL)
-    list(APPEND MATERIALX_LIBRARIES MaterialXGenOsl MaterialXRenderOsl)
-endif()
-
 if(MATERIALX_BUILD_RENDER_CYCLES)
     if(NOT MATERIALX_BUILD_GEN_OSL)
         message(FATAL_ERROR "The Cycles render backend requires MATERIALX_BUILD_GEN_OSL.")
