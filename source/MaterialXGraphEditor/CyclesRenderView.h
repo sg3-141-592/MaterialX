@@ -88,6 +88,13 @@ class CyclesRenderView : public RenderViewBase
         return 1.0f;
     }
 
+    // Toggle sRGB encoding while the render view is drawn by ImGui, so the
+    // linear display texture is encoded like the captured images. Mirrors
+    // GlslRenderView::beginFrameDisplay.
+    void beginFrameDisplay() override;
+
+    void endFrameDisplay() override;
+
     // Camera interaction: left-drag orbits, right/shift-left-drag pans and
     // scroll or keypad +/- zoom. Camera changes restart the progressive render.
     void setMouseButtonEvent(int button, bool down, mx::Vector2 pos) override;

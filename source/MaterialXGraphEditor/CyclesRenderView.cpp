@@ -230,6 +230,21 @@ ccl::float3 toFloat3(const mx::Color3& c)
     return ccl::make_float3(c[0], c[1], c[2]);
 }
 
+// ImGui draw-list callbacks that toggle sRGB encoding while the render view is
+// drawn, mirroring GlslRenderView::beginFrameDisplay. The Cycles display
+// texture holds linear scene-referred data (GL_RGBA32F), so without this the
+// preview is written to the default framebuffer without the linear-to-sRGB
+// encode and appears far darker than the captured images.
+void enableSRGBCallback(const ImDrawList*, const ImDrawCmd*)
+{
+    glEnable(GL_FRAMEBUFFER_SRGB);
+}
+
+void disableSRGBCallback(const ImDrawList*, const ImDrawCmd*)
+{
+    glDisable(GL_FRAMEBUFFER_SRGB);
+}
+
 ccl::PassType passTypeFromName(const std::string& name)
 {
     if (name == "albedo" || name == "diffuse_color")
@@ -244,6 +259,16 @@ ccl::PassType passTypeFromName(const std::string& name)
 //
 // CyclesRenderView methods
 //
+
+void CyclesRenderView::beginFrameDisplay()
+{
+    ImGui::GetWindowDrawList()->AddCallback(enableSRGBCallback, nullptr);
+}
+
+void CyclesRenderView::endFrameDisplay()
+{
+    ImGui::GetWindowDrawList()->AddCallback(disableSRGBCallback, nullptr);
+}
 
 CyclesRenderView::CyclesRenderView(mx::DocumentPtr doc,
                                    mx::DocumentPtr stdLib,
