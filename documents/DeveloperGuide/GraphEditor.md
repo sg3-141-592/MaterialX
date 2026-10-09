@@ -39,7 +39,7 @@ Notes on this option:
 
 Once built, the active renderer can be selected from the **Viewer** menu.  When the Cycles backend is active, the same menu exposes controls for the displayed pass (Combined or Albedo), the OpenImageDenoise denoiser, adaptive sampling, sample count, and environment light intensity.  Command-line equivalents such as `--renderBackend Cycles` and `--samples` are documented under [Command-Line Options](#command-line-options).
 
-At runtime Cycles reads its OSL node shaders and headers from its shader directory.  When built from MaterialX, the path is compiled in through `CYCLES_SHADER_DIR` and applied via the `CYCLES_SHADER_PATH` environment variable unless that variable is already set.  On Linux the precompiled Cycles dependency libraries use `$ORIGIN` run paths, so the platform library folders must also be discoverable at run time; setting `LD_LIBRARY_PATH` to the directories reported by the `CYCLES_BUNDLED_LIBRARY_DIRS` CMake variable (e.g. from `/path/to/cycles/lib/linux_x64/*/lib`) is sufficient.
+At runtime Cycles reads its OSL node shaders and headers from its shader directory.  When built from MaterialX, the path is compiled in through `CYCLES_SHADER_DIR` and applied via the `CYCLES_SHADER_PATH` environment variable unless that variable is already set.  The Cycles runtime shared libraries are copied next to the **MaterialXGraphEditor** executable and located through a relative rpath, so the executable can be launched directly without setting `LD_LIBRARY_PATH`.  Set `MATERIALX_CYCLES_BUNDLE_RUNTIME=OFF` to skip this bundling (for example when the Cycles libraries are already provided by the environment).
 
 ## Summary of Graph Editor Features
 
