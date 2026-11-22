@@ -27,6 +27,10 @@ if(MATERIALX_BUILD_RENDER_CYCLES)
     list(APPEND materialx_source "${CMAKE_CURRENT_SOURCE_DIR}/CyclesRenderPipeline.cpp")
 endif()
 
+if(MATERIALX_BUILD_RENDER_HYDRA)
+    list(APPEND materialx_source "${CMAKE_CURRENT_SOURCE_DIR}/HydraRenderPipeline.cpp")
+endif()
+
 if (APPLE)
     list(APPEND materialx_source ${CMAKE_CURRENT_SOURCE_DIR}/FileDialog_Darwin.mm)
 endif ()
@@ -43,6 +47,10 @@ set(materialx_headers
 
 if(MATERIALX_BUILD_RENDER_CYCLES)
     list(APPEND materialx_headers "${CMAKE_CURRENT_SOURCE_DIR}/CyclesRenderPipeline.h")
+endif()
+
+if(MATERIALX_BUILD_RENDER_HYDRA)
+    list(APPEND materialx_headers "${CMAKE_CURRENT_SOURCE_DIR}/HydraRenderPipeline.h")
 endif()
 
 file(GLOB imgui_source "${DEAR_IMGUI_PREFIX}/*.cpp")
@@ -152,6 +160,102 @@ if(MATERIALX_BUILD_RENDER_CYCLES)
         CYCLES_SHADER_DIR="${MATERIALX_CYCLES_SHADER_DIR}")
 endif()
 
+if(MATERIALX_BUILD_RENDER_HYDRA)
+    if(NOT TARGET hdCycles)
+        message(FATAL_ERROR "MATERIALX_BUILD_RENDER_HYDRA requires the embedded Cycles Hydra delegate target.")
+    endif()
+    if(NOT TARGET bf::dependencies::optional::usd)
+        message(FATAL_ERROR "MATERIALX_BUILD_RENDER_HYDRA requires the bundled USD dependency target.")
+    endif()
+
+    list(APPEND MATERIALX_LIBRARIES
+        bf::dependencies::optional::usd
+        bf::dependencies::optional::tbb)
+    if(TARGET Cycles::cycles)
+        # The bundled monolithic USD library has link-time dependencies on the
+        # Cycles third-party stack. Linking the combined Cycles library brings
+        # those dependencies in even when the native Cycles pipeline is disabled.
+        list(APPEND MATERIALX_LIBRARIES Cycles::cycles)
+    endif()
+    add_dependencies(MaterialXGraphEditor hdCycles)
+    set(_materialx_cycles_embedded TRUE)
+    if(NOT MATERIALX_CYCLES_SHADER_DIR AND DEFINED CYCLES_BUILD_SHADER_DIR)
+        set(MATERIALX_CYCLES_SHADER_DIR "${CYCLES_BUILD_SHADER_DIR}")
+    endif()
+
+    set(_materialx_hydra_plugin_dir "${CMAKE_CURRENT_BINARY_DIR}/hydra-plugin")
+    set(_materialx_hydra_install_dir "${CMAKE_CURRENT_BINARY_DIR}/hydra-install")
+    file(MAKE_DIRECTORY "${_materialx_hydra_plugin_dir}" "${_materialx_hydra_install_dir}")
+
+    # Build-tree manifest uses the fetched Cycles build tree for plugin
+    # resources. The install manifest points at the executable's parent
+    # directory, where the shader directory is installed.
+    set(_materialx_hydra_resource_dir "${cycles_BINARY_DIR}")
+    configure_file("${CMAKE_CURRENT_SOURCE_DIR}/HydraPlugInfo.json.in"
+                   "${_materialx_hydra_plugin_dir}/plugInfo.json" @ONLY)
+    set(_materialx_hydra_resource_dir "..")
+    configure_file("${CMAKE_CURRENT_SOURCE_DIR}/HydraPlugInfo.json.in"
+                   "${_materialx_hydra_install_dir}/plugInfo.json" @ONLY)
+
+    add_custom_target(materialx_hydra_runtime ALL
+        COMMAND ${CMAKE_COMMAND} -E make_directory
+            "$<TARGET_FILE_DIR:MaterialXGraphEditor>/hydra"
+        COMMAND ${CMAKE_COMMAND} -E copy_if_different
+            "$<TARGET_FILE:hdCycles>"
+            "$<TARGET_FILE_DIR:MaterialXGraphEditor>/hydra/hdCycles${CMAKE_SHARED_LIBRARY_SUFFIX}"
+        COMMAND ${CMAKE_COMMAND} -E copy_if_different
+            "${_materialx_hydra_plugin_dir}/plugInfo.json"
+            "$<TARGET_FILE_DIR:MaterialXGraphEditor>/hydra/plugInfo.json"
+        DEPENDS hdCycles
+        COMMENT "Copying hdCycles Hydra plugin"
+        VERBATIM)
+    add_dependencies(MaterialXGraphEditor materialx_hydra_runtime)
+
+    set(_materialx_hydra_usd_plugin_dir "${MATERIALX_CYCLES_USD_ROOT}/lib/usd")
+    set(_materialx_hydra_mtlx_library_path "")
+    if(MATERIALX_CYCLES_USD_ROOT)
+        file(GLOB _materialx_mtlx_library_dirs
+            "${MATERIALX_CYCLES_USD_ROOT}/lib/usd/usdMtlx/resources/*/*/*/*/*/materialx/libraries")
+        if(_materialx_mtlx_library_dirs)
+            list(GET _materialx_mtlx_library_dirs 0 _materialx_hydra_mtlx_library_path)
+        endif()
+    endif()
+
+    if(PYTHON_INCLUDE_DIR)
+        target_include_directories(MaterialXGraphEditor PRIVATE "${PYTHON_INCLUDE_DIR}")
+    endif()
+    if(PYTHON_INCLUDE_CONFIG_DIR)
+        target_include_directories(MaterialXGraphEditor PRIVATE "${PYTHON_INCLUDE_CONFIG_DIR}")
+    endif()
+    if(TBB_INCLUDE_DIR)
+        target_include_directories(MaterialXGraphEditor PRIVATE "${TBB_INCLUDE_DIR}")
+    endif()
+
+    target_compile_definitions(MaterialXGraphEditor PRIVATE
+        MATERIALX_BUILD_RENDER_HYDRA
+        MATERIALX_HYDRA_PLUGIN_DIR="${_materialx_hydra_plugin_dir}"
+        MATERIALX_HYDRA_USD_PLUGIN_DIR="${_materialx_hydra_usd_plugin_dir}"
+        MATERIALX_HYDRA_MTLX_LIBRARY_PATH="${_materialx_hydra_mtlx_library_path}")
+
+    install(FILES "${_materialx_hydra_install_dir}/plugInfo.json"
+            DESTINATION "${MATERIALX_INSTALL_BIN_PATH}/hydra")
+    install(TARGETS hdCycles
+            LIBRARY DESTINATION "${MATERIALX_INSTALL_BIN_PATH}/hydra"
+            RUNTIME DESTINATION "${MATERIALX_INSTALL_BIN_PATH}/hydra")
+    if(NOT MATERIALX_BUILD_RENDER_CYCLES)
+        install(DIRECTORY "${CYCLES_BUILD_SHADER_DIR}/"
+                DESTINATION "${MATERIALX_INSTALL_BIN_PATH}/shader")
+    endif()
+    if(MATERIALX_CYCLES_USD_ROOT)
+        install(FILES "${MATERIALX_CYCLES_USD_ROOT}/lib/libusd_ms.so"
+                DESTINATION "${MATERIALX_INSTALL_BIN_PATH}")
+        install(DIRECTORY "${MATERIALX_CYCLES_USD_ROOT}/lib/usd/"
+                DESTINATION "${MATERIALX_INSTALL_BIN_PATH}/usd/lib/usd")
+        install(DIRECTORY "${MATERIALX_CYCLES_USD_ROOT}/plugin/usd/"
+                DESTINATION "${MATERIALX_INSTALL_BIN_PATH}/usd/plugin/usd")
+    endif()
+endif()
+
 if(APPLE)
     find_library(CORE_FOUNDATION Foundation REQUIRED)
     list(APPEND MATERIALX_LIBRARIES ${CORE_FOUNDATION})
@@ -163,7 +267,7 @@ target_link_libraries(
     ${MATERIALX_LIBRARIES}
  	glfw_minimal)
 
-if(MATERIALX_BUILD_RENDER_CYCLES)
+if(MATERIALX_BUILD_RENDER_CYCLES OR MATERIALX_BUILD_RENDER_HYDRA)
     # Copy the Cycles OSL shaders and headers beside the executable so that
     # CYCLES_SHADER_PATH can be resolved relative to the executable at runtime.
     add_custom_command(TARGET MaterialXGraphEditor POST_BUILD
@@ -181,7 +285,7 @@ endif()
 # siblings in other directories, so the executable cannot resolve them through
 # its own rpath. Copy the whole dependency closure next to the executable and
 # point the rpaths at "$ORIGIN" so that it runs without LD_LIBRARY_PATH.
-if(MATERIALX_BUILD_RENDER_CYCLES AND MATERIALX_CYCLES_BUNDLE_RUNTIME AND _materialx_cycles_embedded AND RPATH_RELATIVE_SYMBOL)
+if((MATERIALX_BUILD_RENDER_CYCLES OR MATERIALX_BUILD_RENDER_HYDRA) AND MATERIALX_CYCLES_BUNDLE_RUNTIME AND _materialx_cycles_embedded AND RPATH_RELATIVE_SYMBOL)
     # cycles_shared's build-tree rpath points at the original precompiled
     # directories, which would bypass the bundled copies, so override it.
     set_target_properties(cycles_shared PROPERTIES
@@ -239,7 +343,7 @@ endif()
 install(TARGETS MaterialXGraphEditor
     EXPORT MaterialX
     RUNTIME DESTINATION ${MATERIALX_INSTALL_BIN_PATH})
-if(MATERIALX_BUILD_RENDER_CYCLES AND MATERIALX_CYCLES_BUNDLE_RUNTIME AND _materialx_cycles_embedded)
+if((MATERIALX_BUILD_RENDER_CYCLES OR MATERIALX_BUILD_RENDER_HYDRA) AND MATERIALX_CYCLES_BUNDLE_RUNTIME AND _materialx_cycles_embedded)
     # Install the libraries bundled beside the build-tree executable. Using the
     # actual build output directory handles multi-config generators; the install
     # prefix is resolved at install time so that --prefix works.

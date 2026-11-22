@@ -1,0 +1,22 @@
+{
+    "Plugins": [
+        {
+            "Info": {
+                "Types": {
+                    "HdCyclesPlugin": {
+                        "bases": [
+                            "HdRendererPlugin"
+                        ],
+                        "displayName": "Cycles",
+                        "priority": 0
+                    }
+                }
+            },
+            "LibraryPath": "hdCycles@CMAKE_SHARED_LIBRARY_SUFFIX@",
+            "Name": "hdCycles",
+            "ResourcePath": "@_materialx_hydra_resource_dir@",
+            "Root": ".",
+            "Type": "library"
+        }
+    ]
+}
