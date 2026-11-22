@@ -71,6 +71,22 @@ if ! compgen -G "$package_dir/bin/shader/node_*.oso" >/dev/null; then
     exit 1
 fi
 
+# Hydra is optional, but if its plugin is packaged, its USD resources must be
+# present as well.
+if [[ -e "$package_dir/bin/hydra/plugInfo.json" ]]; then
+    hydra_required=(
+        "$package_dir/bin/hydra/hdCycles.so"
+        "$package_dir/bin/usd/lib/usd/ar/resources/plugInfo.json"
+        "$package_dir/bin/usd/lib/usd/usdMtlx/resources/plugInfo.json"
+    )
+    for path in "${hydra_required[@]}"; do
+        if [[ ! -e "$path" ]]; then
+            echo "error: required Hydra runtime file is missing: $path" >&2
+            exit 1
+        fi
+    done
+fi
+
 mkdir -p "$(dirname "$output_zip")"
 rm -f "$output_zip"
 (cd "$package_parent" && zip -y -r "$output_zip" "$package_name" >/dev/null)

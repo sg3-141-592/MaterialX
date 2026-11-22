@@ -41,12 +41,32 @@ Once built, the active renderer can be selected from the **Viewer** menu.  When 
 
 At runtime Cycles reads its OSL node shaders and headers from its shader directory.  When built from MaterialX, the path is compiled in through `CYCLES_SHADER_DIR` and applied via the `CYCLES_SHADER_PATH` environment variable unless that variable is already set.  The Cycles runtime shared libraries are copied next to the **MaterialXGraphEditor** executable and located through a relative rpath, so the executable can be launched directly without setting `LD_LIBRARY_PATH`.  Set `MATERIALX_CYCLES_BUNDLE_RUNTIME=OFF` to skip this bundling (for example when the Cycles libraries are already provided by the environment).
 
+## Hydra Render Backend
+
+The Graph Editor can also preview scenes through a USD Hydra render delegate.  Enable it with:
+
+```
+cmake -S . -B build \
+  -DMATERIALX_BUILD_GRAPH_EDITOR=ON \
+  -DMATERIALX_BUILD_RENDER_HYDRA=ON
+cmake --build build --config Release
+```
+
+`MATERIALX_BUILD_RENDER_HYDRA` is independent of `MATERIALX_BUILD_RENDER_CYCLES`.  When both are enabled, the fetched Cycles checkout is shared between them.  The initial Hydra implementation uses only the bundled Cycles/USD dependencies.
+
+Available backend entries depend on the Hydra render delegates found at runtime:
+
+- `Hydra (Cycles)` uses the bundled `hdCycles` delegate.
+- `Hydra (GL)` is shown when a compatible Storm/GL delegate is available.
+
+The native `Cycles` backend remains the default high-fidelity path for OSL materials, denoising, adaptive sampling, and render-pass controls.  The initial Hydra backend translates the selected MaterialX material to `UsdPreviewSurface`; full MaterialX render-context support is a follow-up.  Textured inputs and other advanced MaterialX nodes may therefore be approximated or ignored in this first version.
+
 ### Renderer Backend Architecture
 
 The Graph Editor separates presentation from rendering:
 
 - `RenderView` owns the document, camera interaction, render settings, ImGui presentation, and frame capture lifecycle.
-- `RenderPipeline` is the renderer abstraction.  `GlslRenderPipeline` and `CyclesRenderPipeline` implement the backend-specific rendering, materials, framebuffers, and render sessions.
+- `RenderPipeline` is the renderer abstraction.  `GlslRenderPipeline`, `CyclesRenderPipeline`, and `HydraRenderPipeline` implement the backend-specific rendering, materials, framebuffers, and render sessions.
 - `RenderCapabilities` and `RenderSettings` describe which controls a backend supports, so the Viewer menu is built from backend capabilities rather than backend-name checks.
 
 To add a renderer, implement a new `RenderPipeline`, register it in `RenderView::getAvailableBackends()` and `RenderView::createPipeline()`, and advertise its supported passes and controls through `getCapabilities()`.  Backend-specific headers should stay out of `RenderView` and other common UI code.
