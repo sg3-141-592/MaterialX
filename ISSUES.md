@@ -66,6 +66,41 @@ needed by the `place2d` transform.
 partitions, applies the combined bounding-box normalization, and writes one
 merged `st` primvar. This is an integration bug, not a USD/Hydra/Cycles issue.
 
+## Fixed Locally: Denoise and Adaptive Settings Not Forwarded (Not Upstream)
+
+### Symptom
+
+The denoiser did not engage in `Hydra (Cycles)`, even though the Render menu
+enabled denoising. Native `Cycles` denoised correctly.
+
+### Cause
+
+`HydraRenderPipeline::Impl::updateSettings()` only forwarded
+`cycles:samples` and the dome-light intensity to hdCycles. It never forwarded
+the `RenderSettings` denoise or adaptive-sampling values. hdCycles exposes the
+Cycles integrator sockets as `cycles:integrator:<socket>`, but those settings
+were left at their defaults (`use_denoise = false`).
+
+### Fix
+
+`updateSettings()` now forwards:
+
+- `cycles:integrator:use_denoise`
+- `cycles:integrator:denoiser_type` (`openimagedenoise`)
+- `cycles:integrator:denoise_use_gpu` (`false`)
+- `cycles:integrator:denoise_start_sample`
+- `cycles:integrator:use_adaptive_sampling`
+- `cycles:integrator:adaptive_threshold`
+- `cycles:integrator:adaptive_min_samples`
+
+`rebuildHost()` also calls `updateSettings()` after creating the render
+delegate, so the settings are applied before the first frame. Denoising is
+scoped to the combined color pass; data passes such as `albedo` remain
+un-denoised.
+
+This is an integration omission, not an hdCycles bug: hdCycles already exposes
+these integrator settings through `cycles:integrator:*`.
+
 ## Potential hdCycles Issues
 
 These are candidates for an upstream issue or patch against the Blender/Cycles

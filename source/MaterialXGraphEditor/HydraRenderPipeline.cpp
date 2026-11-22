@@ -1146,6 +1146,7 @@ void HydraRenderPipeline::Impl::rebuildHost()
     taskController->SetCollection(collection);
     taskController->SetCameraPath(cameraPath);
     applyRenderSize();
+    updateSettings();
 
     engine = std::make_unique<HdEngine>();
     engine->SetTaskContextData(HdxTokens->selectionState,
@@ -1184,8 +1185,31 @@ void HydraRenderPipeline::Impl::updateSettings()
     {
         return;
     }
-    renderDelegate->SetRenderSetting(TfToken("cycles:samples"),
-                                     VtValue(std::min(settings.maxSamples, MAX_PREVIEW_SAMPLES)));
+    if (delegateId == "HdCyclesPlugin")
+    {
+        renderDelegate->SetRenderSetting(TfToken("cycles:samples"),
+                                         VtValue(std::min(settings.maxSamples, MAX_PREVIEW_SAMPLES)));
+
+        // hdCycles exposes Cycles integrator sockets as
+        // "cycles:integrator:<name>". Denoising only applies to the combined
+        // color pass; albedo and other data passes stay unlit and un-denoised.
+        const bool denoiseActive = settings.denoise && renderOutputToken() == HdAovTokens->color;
+        renderDelegate->SetRenderSetting(TfToken("cycles:integrator:use_denoise"),
+                                         VtValue(denoiseActive));
+        renderDelegate->SetRenderSetting(TfToken("cycles:integrator:denoiser_type"),
+                                         VtValue(TfToken("openimagedenoise")));
+        renderDelegate->SetRenderSetting(TfToken("cycles:integrator:denoise_use_gpu"),
+                                         VtValue(false));
+        renderDelegate->SetRenderSetting(TfToken("cycles:integrator:denoise_start_sample"),
+                                         VtValue(settings.denoiseStartSample));
+        renderDelegate->SetRenderSetting(TfToken("cycles:integrator:use_adaptive_sampling"),
+                                         VtValue(settings.adaptiveSampling));
+        renderDelegate->SetRenderSetting(TfToken("cycles:integrator:adaptive_threshold"),
+                                         VtValue(settings.adaptiveThreshold));
+        renderDelegate->SetRenderSetting(TfToken("cycles:integrator:adaptive_min_samples"),
+                                         VtValue(settings.adaptiveMinSamples));
+    }
+
     if (domeLight)
     {
         domeLight.CreateIntensityAttr().Set(settings.lightIntensity);
