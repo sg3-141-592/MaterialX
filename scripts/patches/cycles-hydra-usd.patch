@@ -33,7 +33,7 @@ index 3b9919f..f8b4b0c 100644
            cyclesType = nodeDesc.mapping->nodeType();
          }
 diff --git a/src/hydra/render_delegate.cpp b/src/hydra/render_delegate.cpp
-index ea3dae9..246b4a3 100644
+index ea3dae9..9a86ee9 100644
 --- a/src/hydra/render_delegate.cpp
 +++ b/src/hydra/render_delegate.cpp
 @@ -108,6 +108,10 @@ SessionParams GetSessionParams(const HdRenderSettingsMap &settings)
@@ -47,11 +47,31 @@ index ea3dae9..246b4a3 100644
    return params;
  }
 
+@@ -398,6 +402,9 @@ HdAovDescriptor HdCyclesDelegate::GetDefaultAovDescriptor(const TfToken &name) c
+
+     return HdAovDescriptor(colorFormat, false, VtValue(GfVec4f(0.0f)));
+   }
++  if (name == TfToken("albedo")) {
++    return HdAovDescriptor(HdFormatFloat32Vec4, false, VtValue(GfVec4f(0.0f)));
++  }
+   if (name == HdAovTokens->depth) {
+     return HdAovDescriptor(HdFormatFloat32, false, VtValue(1.0f));
+   }
 diff --git a/src/hydra/session.cpp b/src/hydra/session.cpp
-index 602ef2b..2fc80af 100644
+index 602ef2b..8e3af61 100644
 --- a/src/hydra/session.cpp
 +++ b/src/hydra/session.cpp
-@@ -150,8 +150,11 @@ void HdCyclesSession::SyncAovBindings(const HdRenderPassAovBindingVector &aovBin
+@@ -20,6 +20,9 @@ namespace {
+
+ const std::unordered_map<TfToken, PassType, TfToken::HashFunctor> kAovToPass = {
+     {HdAovTokens->color, PASS_COMBINED},
++    // Hydra has no standard albedo token. Match the graph editor's data pass
++    // name and expose Cycles' diffuse color (albedo) pass through it.
++    {TfToken("albedo"), PASS_DIFFUSE_COLOR},
+     {HdAovTokens->depth, PASS_DEPTH},
+     {HdAovTokens->normal, PASS_NORMAL},
+     {HdAovTokens->primId, PASS_OBJECT_ID},
+@@ -150,8 +153,11 @@ void HdCyclesSession::SyncAovBindings(const HdRenderPassAovBindingVector &aovBin
    for (const HdRenderPassAovBinding &aovBinding : aovBindings) {
      const auto cyclesAov = kAovToPass.find(aovBinding.aovName);
      if (cyclesAov == kAovToPass.end()) {

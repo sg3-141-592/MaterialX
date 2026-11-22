@@ -463,6 +463,7 @@ struct HydraRenderPipeline::Impl
     int viewWidth = 0;
     int viewHeight = 0;
     unsigned int textureID = 0;
+    TfToken currentRenderOutput;
 
     bool initialized = false;
     bool stageDirty = true;
@@ -493,6 +494,17 @@ struct HydraRenderPipeline::Impl
     std::unique_ptr<HgiGL> hgi;
     HdDriver hgiDriver;
     HdTaskSharedPtrVector tasks;
+
+    TfToken renderOutputToken() const
+    {
+        // The albedo data pass is only wired up for the bundled Cycles
+        // delegate. Other delegates fall back to the combined color AOV.
+        const bool albedoSupported = delegateId == "HdCyclesPlugin";
+        const bool albedoRequested = settings.renderPass == "albedo" ||
+                                     settings.renderPass == "diffuse_color";
+        return (albedoSupported && albedoRequested) ?
+               TfToken("albedo") : HdAovTokens->color;
+    }
 
     void initialize();
     void loadGeometry();
@@ -793,7 +805,8 @@ void HydraRenderPipeline::Impl::rebuildHost()
     taskController = std::make_unique<HdxTaskController>(renderIndex.get(), SdfPath("/task_controller"));
     taskController->SetEnablePresentation(false);
     taskController->SetEnableSelection(false);
-    taskController->SetRenderOutputs({HdAovTokens->color});
+    currentRenderOutput = renderOutputToken();
+    taskController->SetRenderOutputs({currentRenderOutput});
     taskController->SetRenderTags({HdRenderTagTokens->geometry, HdRenderTagTokens->render});
 
     HdRprimCollection collection(HdTokens->geometry, HdReprSelector(HdReprTokens->smoothHull));
@@ -826,6 +839,15 @@ void HydraRenderPipeline::Impl::applyRenderSize()
 
 void HydraRenderPipeline::Impl::updateSettings()
 {
+    if (taskController)
+    {
+        const TfToken output = renderOutputToken();
+        if (output != currentRenderOutput)
+        {
+            currentRenderOutput = output;
+            taskController->SetRenderOutputs({currentRenderOutput});
+        }
+    }
     if (!renderDelegate)
     {
         return;
@@ -845,7 +867,7 @@ void HydraRenderPipeline::Impl::uploadFrame()
         return;
     }
 
-    HdRenderBuffer* renderBuffer = taskController->GetRenderOutput(HdAovTokens->color);
+    HdRenderBuffer* renderBuffer = taskController->GetRenderOutput(renderOutputToken());
     if (!renderBuffer)
     {
         return;
@@ -862,7 +884,8 @@ void HydraRenderPipeline::Impl::uploadFrame()
     const HdFormat format = renderBuffer->GetFormat();
     if (format != HdFormatFloat32Vec4 && format != HdFormatFloat16Vec4)
     {
-        std::cerr << "Hydra: unsupported color AOV format " << format << std::endl;
+        std::cerr << "Hydra: unsupported " << renderOutputToken().GetText()
+                  << " AOV format " << format << std::endl;
         return;
     }
 
@@ -970,7 +993,7 @@ HydraRenderPipeline::HydraRenderPipeline(mx::DocumentPtr doc,
                                          int viewWidth,
                                          int viewHeight,
                                          const std::string& delegateId,
-                                         const std::string& /*renderPass*/) :
+                                         const std::string& renderPass) :
     _impl(std::make_unique<Impl>()),
     _displayName("Hydra (" + delegateId + ")")
 {
@@ -981,6 +1004,7 @@ HydraRenderPipeline::HydraRenderPipeline(mx::DocumentPtr doc,
     _impl->searchPath = searchPath;
     _impl->viewWidth = viewWidth;
     _impl->viewHeight = viewHeight;
+    _impl->settings.renderPass = renderPass.empty() ? "combined" : renderPass;
     _impl->viewCamera = mx::Camera::create();
     _impl->delegateId = delegateId == "Cycles" ? "HdCyclesPlugin" :
                        (delegateId == "GL" ? "HdStormRendererPlugin" : delegateId);
@@ -1017,6 +1041,11 @@ RenderCapabilities HydraRenderPipeline::getCapabilities() const
 {
     RenderCapabilities caps;
     caps.passes = { { "combined", "Combined" } };
+    // The albedo data pass is implemented by the bundled Cycles delegate only.
+    if (_impl->delegateId == "HdCyclesPlugin")
+    {
+        caps.passes.push_back({ "albedo", "Albedo" });
+    }
     caps.meshReload = true;
     caps.asynchronous = true;
     return caps;
