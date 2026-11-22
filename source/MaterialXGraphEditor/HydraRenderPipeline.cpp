@@ -537,7 +537,9 @@ void HydraRenderPipeline::Impl::updateCamera()
         eye = cameraState.target + offset;
     }
 
-    mx::Vector3 target = cameraState.target + cameraState.userTranslation;
+    mx::Vector3 panOffset = cameraState.userTranslation;
+    mx::Vector3 target = cameraState.target + panOffset;
+    eye += panOffset;
     mx::Vector3 forward = (target - eye).getNormalized();
     mx::Vector3 up = cameraState.up;
     if (viewCamera)
@@ -548,10 +550,10 @@ void HydraRenderPipeline::Impl::updateCamera()
     mx::Vector3 camUp = right.cross(forward).getNormalized();
 
     GfMatrix4d transform(1.0);
-    transform.SetColumn(0, GfVec4d(right[0], right[1], right[2], 0.0));
-    transform.SetColumn(1, GfVec4d(camUp[0], camUp[1], camUp[2], 0.0));
-    transform.SetColumn(2, GfVec4d(-forward[0], -forward[1], -forward[2], 0.0));
-    transform.SetColumn(3, GfVec4d(eye[0], eye[1], eye[2], 1.0));
+    transform.SetRow(0, GfVec4d(right[0], right[1], right[2], 0.0));
+    transform.SetRow(1, GfVec4d(camUp[0], camUp[1], camUp[2], 0.0));
+    transform.SetRow(2, GfVec4d(-forward[0], -forward[1], -forward[2], 0.0));
+    transform.SetRow(3, GfVec4d(eye[0], eye[1], eye[2], 1.0));
 
     const float pi = std::acos(-1.0f);
     const float aperture = 36.0f;
@@ -635,6 +637,14 @@ void HydraRenderPipeline::Impl::buildStage()
             mx::MeshPartitionPtr partition = sourceMesh->getPartition(0);
             mesh = UsdGeomMesh::Define(stage, SdfPath("/Model/Mesh"));
 
+            // Match the GLSL and native Cycles previews by centering the mesh
+            // and normalizing it to the same two-unit bounding sphere.
+            const mx::Vector3 boundsMin = sourceMesh->getMinimumBounds();
+            const mx::Vector3 boundsMax = sourceMesh->getMaximumBounds();
+            const mx::Vector3 boundsCenter = (boundsMin + boundsMax) * 0.5f;
+            const float boundsRadius = (boundsMax - boundsCenter).getMagnitude();
+            const float meshScale = boundsRadius > 0.0f ? 2.0f / boundsRadius : 1.0f;
+
             VtVec3fArray points;
             mx::MeshStreamPtr positionStream = sourceMesh->getStream(mx::MeshStream::POSITION_ATTRIBUTE, 0);
             if (positionStream)
@@ -643,7 +653,8 @@ void HydraRenderPipeline::Impl::buildStage()
                 for (size_t i = 0; i < positionStream->getSize(); ++i)
                 {
                     const mx::Vector3& p = positionStream->getElement<mx::Vector3>(i);
-                    points.push_back(GfVec3f(p[0], p[1], p[2]));
+                    const mx::Vector3 normalized = (p - boundsCenter) * meshScale;
+                    points.push_back(GfVec3f(normalized[0], normalized[1], normalized[2]));
                 }
             }
             mesh.CreatePointsAttr().Set(points);
@@ -689,9 +700,14 @@ void HydraRenderPipeline::Impl::buildStage()
                 st.Set(texcoords);
             }
 
+            const mx::Vector3 extentMin = (boundsMin - boundsCenter) * meshScale;
+            const mx::Vector3 extentMax = (boundsMax - boundsCenter) * meshScale;
             mesh.CreateExtentAttr().Set(VtVec3fArray{
-                GfVec3f(sourceMesh->getMinimumBounds()[0], sourceMesh->getMinimumBounds()[1], sourceMesh->getMinimumBounds()[2]),
-                GfVec3f(sourceMesh->getMaximumBounds()[0], sourceMesh->getMaximumBounds()[1], sourceMesh->getMaximumBounds()[2])});
+                GfVec3f(extentMin[0], extentMin[1], extentMin[2]),
+                GfVec3f(extentMax[0], extentMax[1], extentMax[2])});
+            mesh.CreateDoubleSidedAttr().Set(true);
+            mesh.CreateOrientationAttr().Set(UsdGeomTokens->rightHanded);
+            mesh.CreateSubdivisionSchemeAttr().Set(UsdGeomTokens->none);
 
             UsdShadeMaterialBindingAPI binding = UsdShadeMaterialBindingAPI::Apply(mesh.GetPrim());
             binding.Bind(material);
@@ -778,7 +794,7 @@ void HydraRenderPipeline::Impl::rebuildHost()
     taskController->SetEnablePresentation(false);
     taskController->SetEnableSelection(false);
     taskController->SetRenderOutputs({HdAovTokens->color});
-    taskController->SetRenderTags({HdRenderTagTokens->geometry});
+    taskController->SetRenderTags({HdRenderTagTokens->geometry, HdRenderTagTokens->render});
 
     HdRprimCollection collection(HdTokens->geometry, HdReprSelector(HdReprTokens->smoothHull));
     collection.SetRootPath(SdfPath::AbsoluteRootPath());
@@ -1103,7 +1119,7 @@ void HydraRenderPipeline::render()
     {
         ++_impl->framesSinceCapture;
         const double now = currentTimeSeconds();
-        if ((_impl->taskController->IsConverged() || _impl->framesSinceCapture > 4) &&
+        if ((_impl->taskController->IsConverged() || _impl->framesSinceCapture > 30) &&
             now - _impl->captureRequestTime >= 0.5)
         {
             _impl->saveCapture();
