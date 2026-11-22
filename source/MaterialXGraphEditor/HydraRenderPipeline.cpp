@@ -25,6 +25,7 @@
 #include <pxr/base/gf/half.h>
 #include <pxr/base/gf/matrix4d.h>
 #include <pxr/base/gf/range1f.h>
+#include <pxr/base/gf/vec2f.h>
 #include <pxr/base/gf/vec2i.h>
 #include <pxr/base/gf/vec3f.h>
 #include <pxr/base/gf/vec4f.h>
@@ -65,6 +66,7 @@
 #include <pxr/usdImaging/usdImaging/delegate.h>
 
 #include <algorithm>
+#include <cctype>
 #include <chrono>
 #include <cmath>
 #include <cstdlib>
@@ -307,21 +309,58 @@ bool setUsdInputValue(UsdShadeShader& shader,
     }
 
     UsdShadeInput input = shader.CreateInput(TfToken(name), usdTypeForMtlxType(type, name));
-    if (type == "float" && value->isA<float>())
+    if (type == "float")
     {
-        return input.Set(value->asA<float>());
+        if (value->isA<float>())
+        {
+            return input.Set(value->asA<float>());
+        }
+        // MaterialX surfaces often express opacity as a color. UsdPreviewSurface
+        // expects a scalar, which the standard translation graph derives from
+        // the average of the color channels.
+        if (value->isA<mx::Color3>())
+        {
+            mx::Color3 color = value->asA<mx::Color3>();
+            return input.Set((color[0] + color[1] + color[2]) / 3.0f);
+        }
+        if (value->isA<int>())
+        {
+            return input.Set(static_cast<float>(value->asA<int>()));
+        }
+        if (value->isA<bool>())
+        {
+            return input.Set(value->asA<bool>() ? 1.0f : 0.0f);
+        }
     }
-    if (type == "integer" && value->isA<int>())
+    if (type == "integer")
     {
-        return input.Set(value->asA<int>());
+        if (value->isA<int>())
+        {
+            return input.Set(value->asA<int>());
+        }
+        if (value->isA<float>())
+        {
+            return input.Set(static_cast<int>(value->asA<float>()));
+        }
     }
     if (type == "boolean" && value->isA<bool>())
     {
         return input.Set(value->asA<bool>());
     }
-    if (type == "color3" && value->isA<mx::Color3>())
+    if (type == "color3")
     {
-        return input.Set(toGfVec3f(value->asA<mx::Color3>()));
+        if (value->isA<mx::Color3>())
+        {
+            return input.Set(toGfVec3f(value->asA<mx::Color3>()));
+        }
+        if (value->isA<mx::Vector3>())
+        {
+            return input.Set(toGfVec3f(value->asA<mx::Vector3>()));
+        }
+        if (value->isA<float>())
+        {
+            return input.Set(GfVec3f(value->asA<float>()));
+        }
     }
     if (type == "vector3" && value->isA<mx::Vector3>())
     {
@@ -390,7 +429,231 @@ mx::NodePtr findSurfaceShaderNode(const mx::DocumentPtr& doc,
     return node;
 }
 
+std::string sanitizePrimName(const std::string& name)
+{
+    std::string result;
+    result.reserve(name.size() + 1);
+    for (char c : name)
+    {
+        result += (std::isalnum(static_cast<unsigned char>(c)) || c == '_') ? c : '_';
+    }
+    if (result.empty() || std::isdigit(static_cast<unsigned char>(result[0])))
+    {
+        result.insert(result.begin(), '_');
+    }
+    return result;
+}
+
+mx::FilePath resolveTextureFile(const mx::NodePtr& imageNode,
+                                const mx::DocumentPtr& document,
+                                const mx::FileSearchPath& searchPath)
+{
+    if (!imageNode)
+    {
+        return mx::FilePath();
+    }
+    mx::InputPtr fileInput = imageNode->getInput("file");
+    if (!fileInput)
+    {
+        return mx::FilePath();
+    }
+
+    const std::string file = fileInput->getValueString();
+    if (file.empty())
+    {
+        return mx::FilePath();
+    }
+
+    mx::FilePath filePath(file);
+    if (filePath.isAbsolute())
+    {
+        return filePath;
+    }
+
+    mx::FilePath prefix = document ? mx::FilePath(document->getActiveFilePrefix()) : mx::FilePath();
+    mx::FilePath relative = prefix.isEmpty() ? filePath : (prefix / filePath);
+
+    // MaterialX file prefixes are relative to the document that declared them.
+    if (document && !document->getSourceUri().empty())
+    {
+        mx::FilePath documentDir = mx::FilePath(document->getSourceUri()).getParentPath();
+        mx::FilePath candidate = documentDir / relative;
+        if (candidate.exists())
+        {
+            return candidate;
+        }
+    }
+
+    mx::FilePath found = searchPath.find(relative);
+    if (!found.isEmpty())
+    {
+        return found;
+    }
+    found = searchPath.find(file);
+    if (!found.isEmpty())
+    {
+        return found;
+    }
+    if (relative.exists())
+    {
+        return relative;
+    }
+    return filePath;
+}
+
+const char* wrapModeForMtlx(const std::string& mode)
+{
+    if (mode == "clamp")
+    {
+        return "clamp";
+    }
+    if (mode == "mirror")
+    {
+        return "mirror";
+    }
+    if (mode == "constant")
+    {
+        return "black";
+    }
+    // MaterialX uses "periodic" for repeating textures; USD uses "repeat".
+    return "repeat";
+}
+
+const char* textureColorSpace(const mx::InputPtr& fileInput)
+{
+    // Without an OCIO configuration Cycles has no named color spaces, so ask
+    // for raw values instead of emitting a warning for "sRGB"/"auto". When a
+    // configuration is available, let Cycles interpret sRGB texture data.
+    if (fileInput && fileInput->getColorSpace() == "srgb_texture" && getenv("OCIO"))
+    {
+        return "sRGB";
+    }
+    return "raw";
+}
+
+template <typename T>
+bool getMtlxInputValue(const mx::NodePtr& node, const std::string& name, T& value)
+{
+    mx::InputPtr input = node ? node->getInput(name) : nullptr;
+    if (input && input->getValue() && input->getValue()->isA<T>())
+    {
+        value = input->getValue()->asA<T>();
+        return true;
+    }
+    return false;
+}
+
+void authorImageTexture(const UsdStagePtr& stage,
+                        UsdGeomMesh& mesh,
+                        const VtVec2fArray& meshUVs,
+                        const SdfPath& materialPath,
+                        const mx::NodePtr& imageNode,
+                        const mx::DocumentPtr& document,
+                        const mx::FileSearchPath& searchPath,
+                        bool flipTextureV,
+                        UsdShadeShader& targetShader,
+                        const std::string& targetInputName,
+                        const std::string& targetType)
+{
+    if (!stage || !imageNode)
+    {
+        return;
+    }
+
+    const std::string suffix = sanitizePrimName(targetInputName);
+    UsdShadeShader texture = UsdShadeShader::Define(
+        stage, materialPath.AppendChild(TfToken("Texture_" + suffix)));
+    texture.CreateIdAttr(VtValue(TfToken("UsdUVTexture")));
+
+    const mx::FilePath textureFile = resolveTextureFile(imageNode, document, searchPath);
+    if (!textureFile.isEmpty())
+    {
+        const std::string resolved = textureFile.asString();
+        texture.CreateInput(TfToken("file"), SdfValueTypeNames->Asset)
+            .Set(SdfAssetPath(resolved, resolved));
+    }
+
+    mx::InputPtr fileInput = imageNode->getInput("file");
+    std::string uaddressMode;
+    std::string vaddressMode;
+    getMtlxInputValue(imageNode, "uaddressmode", uaddressMode);
+    getMtlxInputValue(imageNode, "vaddressmode", vaddressMode);
+    texture.CreateInput(TfToken("wrapS"), SdfValueTypeNames->Token)
+        .Set(TfToken(wrapModeForMtlx(uaddressMode)));
+    texture.CreateInput(TfToken("wrapT"), SdfValueTypeNames->Token)
+        .Set(TfToken(wrapModeForMtlx(vaddressMode)));
+    texture.CreateInput(TfToken("sourceColorSpace"), SdfValueTypeNames->Token)
+        .Set(TfToken(textureColorSpace(fileInput)));
+
+    // Bake the mesh UVs into a per-texture primvar. MaterialX's place2d
+    // transform is not applied yet; raw UVs keep image textures visible while
+    // full nodegraph evaluation remains a follow-up.
+    std::string uvName = "st";
+    if (!meshUVs.empty())
+    {
+        VtVec2fArray transformedUVs;
+        transformedUVs.reserve(meshUVs.size());
+        for (const GfVec2f& uv : meshUVs)
+        {
+            float u = uv[0];
+            float v = uv[1];
+            // hdCycles interprets the V axis opposite to MaterialX's native
+            // image sampling. Flip it so textured previews match the native
+            // Cycles backend.
+            if (flipTextureV)
+            {
+                v = 1.0f - v;
+            }
+            transformedUVs.push_back(GfVec2f(u, v));
+        }
+
+        uvName = "st_" + suffix;
+        UsdGeomPrimvarsAPI primvars(mesh.GetPrim());
+        UsdGeomPrimvar uvPrimvar = primvars.CreatePrimvar(
+            TfToken(uvName), SdfValueTypeNames->TexCoord2fArray, UsdGeomTokens->vertex);
+        uvPrimvar.Set(transformedUVs);
+    }
+
+    UsdShadeShader texcoord = UsdShadeShader::Define(
+        stage, materialPath.AppendChild(TfToken("TexCoord_" + suffix)));
+    texcoord.CreateIdAttr(VtValue(TfToken("UsdPrimvarReader_float2")));
+    texcoord.CreateInput(TfToken("varname"), SdfValueTypeNames->String).Set(uvName);
+    UsdShadeOutput uvOutput = texcoord.CreateOutput(TfToken("result"), SdfValueTypeNames->Float2);
+    texture.CreateInput(TfToken("st"), SdfValueTypeNames->Float2).ConnectToSource(uvOutput);
+
+    std::string outputName;
+    SdfValueTypeName outputType;
+    if (targetType == "float")
+    {
+        outputName = "r";
+        outputType = SdfValueTypeNames->Float;
+    }
+    else if (targetType == "color4" || targetType == "vector4")
+    {
+        outputName = "rgba";
+        outputType = (targetType == "color4") ? SdfValueTypeNames->Color4f : SdfValueTypeNames->Float4;
+    }
+    else
+    {
+        outputName = "rgb";
+        outputType = (targetType == "vector3") ? SdfValueTypeNames->Float3 : SdfValueTypeNames->Color3f;
+    }
+
+    UsdShadeOutput textureOutput = texture.CreateOutput(TfToken(outputName), outputType);
+    UsdShadeInput targetInput = targetShader.CreateInput(
+        TfToken(targetInputName), usdTypeForMtlxType(targetType, targetInputName));
+    targetInput.ConnectToSource(textureOutput);
+}
+
 void authorPreviewSurfaceFromShader(const mx::NodePtr& shader,
+                                    const UsdStagePtr& stage,
+                                    UsdGeomMesh& mesh,
+                                    const VtVec2fArray& meshUVs,
+                                    const SdfPath& materialPath,
+                                    const mx::DocumentPtr& document,
+                                    const mx::FileSearchPath& searchPath,
+                                    bool supportTextures,
+                                    bool flipTextureV,
                                     UsdShadeShader& previewShader)
 {
     struct PreviewInput
@@ -406,7 +669,7 @@ void authorPreviewSurfaceFromShader(const mx::NodePtr& shader,
         { "opacity", "opacity", "float" },
         { "coat", "clearcoat", "float" },
         { "coat_roughness", "clearcoatRoughness", "float" },
-        { "ior", "ior", "float" },
+        { "specular_IOR", "ior", "float" },
     };
 
     if (shader)
@@ -414,10 +677,35 @@ void authorPreviewSurfaceFromShader(const mx::NodePtr& shader,
         for (const PreviewInput& mapping : inputs)
         {
             mx::InputPtr input = shader->getInput(mapping.mtlxName);
-            if (!input || input->getConnectedNode())
+            if (!input)
             {
                 continue;
             }
+
+            mx::NodePtr upstream = input->getConnectedNode();
+            if (upstream)
+            {
+                const std::string category = upstream->getCategory();
+                if (category == "image" && supportTextures)
+                {
+                    authorImageTexture(stage, mesh, meshUVs, materialPath, upstream, document,
+                                       searchPath, flipTextureV, previewShader,
+                                       mapping.usdName, mapping.usdType);
+                }
+                else if (category == "constant")
+                {
+                    mx::InputPtr valueInput = upstream->getInput("value");
+                    if (valueInput)
+                    {
+                        setUsdInputValue(previewShader, mapping.usdName, mapping.usdType,
+                                         valueInput->getValue());
+                    }
+                }
+                // Other node types are not representable as a constant
+                // UsdPreviewSurface input yet; the default below is used.
+                continue;
+            }
+
             setUsdInputValue(previewShader, mapping.usdName, mapping.usdType, input->getValue());
         }
     }
@@ -595,49 +883,7 @@ void HydraRenderPipeline::Impl::buildStage()
     UsdGeomSetStageUpAxis(stage, UsdGeomTokens->y);
     UsdGeomSetStageMetersPerUnit(stage, 1.0);
 
-    // Material
-    material = UsdShadeMaterial::Define(stage, SdfPath("/Model/Material"));
-    UsdShadeShader previewShader = UsdShadeShader::Define(stage, SdfPath("/Model/Material/PreviewSurface"));
-    previewShader.CreateIdAttr(VtValue(TfToken("ND_UsdPreviewSurface_surfaceshader")));
-
-    mx::NodePtr previewNode;
-    mx::DocumentPtr translated = document ? document->copy() : nullptr;
-    try
-    {
-        if (translated)
-        {
-            mx::ShaderTranslator::create()->translateAllMaterials(translated, "UsdPreviewSurface");
-            previewNode = findUsdPreviewSurfaceNode(translated);
-        }
-    }
-    catch (std::exception& e)
-    {
-        std::cerr << "Hydra: MaterialX to UsdPreviewSurface translation failed: " << e.what() << std::endl;
-    }
-
-    mx::NodePtr sourceShader = findSurfaceShaderNode(document, renderElement);
-    if (sourceShader)
-    {
-        authorPreviewSurfaceFromShader(sourceShader, previewShader);
-    }
-    else if (previewNode)
-    {
-        for (mx::InputPtr input : previewNode->getInputs())
-        {
-            if (!input->getConnectedNode())
-            {
-                setUsdInputValue(previewShader, input->getName(), input->getType(), input->getValue());
-            }
-        }
-    }
-    else
-    {
-        authorPreviewSurfaceFromShader(nullptr, previewShader);
-    }
-
-    UsdShadeOutput surface = previewShader.CreateOutput(TfToken("surface"), SdfValueTypeNames->Token);
-    material.CreateSurfaceOutput().ConnectToSource(surface);
-    material.CreateSurfaceOutput(TfToken("cycles")).ConnectToSource(surface);
+    VtVec2fArray meshUVs;
 
     // Geometry: use the first mesh partition. This matches the current preview
     // use case and can be extended to geom subsets later.
@@ -710,6 +956,7 @@ void HydraRenderPipeline::Impl::buildStage()
                 UsdGeomPrimvarsAPI primvars(mesh.GetPrim());
                 UsdGeomPrimvar st = primvars.CreatePrimvar(TfToken("st"), SdfValueTypeNames->TexCoord2fArray, UsdGeomTokens->vertex);
                 st.Set(texcoords);
+                meshUVs = texcoords;
             }
 
             const mx::Vector3 extentMin = (boundsMin - boundsCenter) * meshScale;
@@ -720,10 +967,63 @@ void HydraRenderPipeline::Impl::buildStage()
             mesh.CreateDoubleSidedAttr().Set(true);
             mesh.CreateOrientationAttr().Set(UsdGeomTokens->rightHanded);
             mesh.CreateSubdivisionSchemeAttr().Set(UsdGeomTokens->none);
-
-            UsdShadeMaterialBindingAPI binding = UsdShadeMaterialBindingAPI::Apply(mesh.GetPrim());
-            binding.Bind(material);
         }
+    }
+
+    // Material
+    material = UsdShadeMaterial::Define(stage, SdfPath("/Model/Material"));
+    UsdShadeShader previewShader = UsdShadeShader::Define(stage, SdfPath("/Model/Material/PreviewSurface"));
+    previewShader.CreateIdAttr(VtValue(TfToken("ND_UsdPreviewSurface_surfaceshader")));
+
+    mx::NodePtr previewNode;
+    mx::DocumentPtr translated = document ? document->copy() : nullptr;
+    try
+    {
+        if (translated)
+        {
+            mx::ShaderTranslator::create()->translateAllMaterials(translated, "UsdPreviewSurface");
+            previewNode = findUsdPreviewSurfaceNode(translated);
+        }
+    }
+    catch (std::exception& e)
+    {
+        std::cerr << "Hydra: MaterialX to UsdPreviewSurface translation failed: " << e.what() << std::endl;
+    }
+
+    mx::NodePtr sourceShader = findSurfaceShaderNode(document, renderElement);
+    if (sourceShader)
+    {
+        const bool cyclesDelegate = delegateId == "HdCyclesPlugin";
+        authorPreviewSurfaceFromShader(sourceShader, stage, mesh, meshUVs, material.GetPath(),
+                                       document, searchPath, cyclesDelegate, cyclesDelegate,
+                                       previewShader);
+    }
+    else if (previewNode)
+    {
+        for (mx::InputPtr input : previewNode->getInputs())
+        {
+            if (!input->getConnectedNode())
+            {
+                setUsdInputValue(previewShader, input->getName(), input->getType(), input->getValue());
+            }
+        }
+    }
+    else
+    {
+        const bool cyclesDelegate = delegateId == "HdCyclesPlugin";
+        authorPreviewSurfaceFromShader(nullptr, stage, mesh, meshUVs, material.GetPath(),
+                                       document, searchPath, cyclesDelegate, cyclesDelegate,
+                                       previewShader);
+    }
+
+    UsdShadeOutput surface = previewShader.CreateOutput(TfToken("surface"), SdfValueTypeNames->Token);
+    material.CreateSurfaceOutput().ConnectToSource(surface);
+    material.CreateSurfaceOutput(TfToken("cycles")).ConnectToSource(surface);
+
+    if (mesh.GetPrim())
+    {
+        UsdShadeMaterialBindingAPI binding = UsdShadeMaterialBindingAPI::Apply(mesh.GetPrim());
+        binding.Bind(material);
     }
 
     // Camera

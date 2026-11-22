@@ -1,5 +1,5 @@
 diff --git a/src/hydra/material.cpp b/src/hydra/material.cpp
-index 3b9919f..f8b4b0c 100644
+index 3b9919f..b24a5dc 100644
 --- a/src/hydra/material.cpp
 +++ b/src/hydra/material.cpp
 @@ -270,6 +270,12 @@ void HdCyclesMaterial::UpdateParameters(NodeDesc &nodeDesc,
@@ -15,7 +15,7 @@ index 3b9919f..f8b4b0c 100644
      // See if the parameter name is in USDPreviewSurface terms, and needs to be converted
      const UsdToCyclesMapping *inputMapping = nodeDesc.mapping;
      const std::string inputName = inputMapping ?
-@@ -438,8 +444,15 @@ void HdCyclesMaterial::PopulateShaderGraph(const HdMaterialNetwork2 &networkMap)
+@@ -438,15 +444,34 @@ void HdCyclesMaterial::PopulateShaderGraph(const HdMaterialNetwork2 &networkMap)
          nodeDesc.mapping = sUsdToCyles->findCycles(cyclesType);
        }
        else {
@@ -32,6 +32,26 @@ index 3b9919f..f8b4b0c 100644
          if (nodeDesc.mapping) {
            cyclesType = nodeDesc.mapping->nodeType();
          }
+       }
+
+       // If it's a native Cycles' node-type, just do the lookup now.
+-      if (const NodeType *nodeType = NodeType::find(cyclesType)) {
++      const NodeType *nodeType = NodeType::find(cyclesType);
++      if (!nodeType) {
++        // Cycles registers node types lazily on first use. Ensure the types
++        // used by USD material networks are registered before lookup.
++        if (cyclesType == "image_texture") {
++          ImageTextureNode::get_node_type();
++        }
++        else if (cyclesType == "mapping") {
++          MappingNode::get_node_type();
++        }
++        nodeType = NodeType::find(cyclesType);
++      }
++      if (nodeType) {
+         nodeDesc.node = graph->create_node(nodeType);
+         _nodes.emplace(nodePath, nodeDesc);
+       }
 diff --git a/src/hydra/render_delegate.cpp b/src/hydra/render_delegate.cpp
 index ea3dae9..9a86ee9 100644
 --- a/src/hydra/render_delegate.cpp
