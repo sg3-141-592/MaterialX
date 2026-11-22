@@ -10,7 +10,7 @@ endif()
 find_package(Git REQUIRED)
 
 execute_process(
-    COMMAND "${GIT_EXECUTABLE}" apply --reverse --check "${PATCH_FILE}"
+    COMMAND "${GIT_EXECUTABLE}" apply --reverse --check --ignore-whitespace "${PATCH_FILE}"
     RESULT_VARIABLE _already_applied
     OUTPUT_QUIET
     ERROR_QUIET)

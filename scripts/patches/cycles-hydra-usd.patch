@@ -5,7 +5,7 @@ index 3b9919f..f8b4b0c 100644
 @@ -270,6 +270,12 @@ void HdCyclesMaterial::UpdateParameters(NodeDesc &nodeDesc,
    for (const auto &param : parameters) {
      VtValue value = param.second;
- 
+
 +    // Sdr material networks carry metadata parameters such as
 +    // "typeName:diffuseColor" alongside actual shader inputs. Ignore them.
 +    if (param.first.GetString().rfind("typeName:", 0) == 0) {
@@ -39,11 +39,29 @@ index ea3dae9..246b4a3 100644
 @@ -108,6 +108,10 @@ SessionParams GetSessionParams(const HdRenderSettingsMap &settings)
      params.device = Device::get_multi_device(devices, params.threads, params.background);
    }
- 
+
 +  // Keep the denoise device in sync with the render device. The default empty
 +  // denoise device triggers an assertion in DeviceInfo equality checks.
 +  params.denoise_device = params.device;
 +
    return params;
  }
- 
+
+diff --git a/src/hydra/session.cpp b/src/hydra/session.cpp
+index 602ef2b..2fc80af 100644
+--- a/src/hydra/session.cpp
++++ b/src/hydra/session.cpp
+@@ -150,8 +150,11 @@ void HdCyclesSession::SyncAovBindings(const HdRenderPassAovBindingVector &aovBin
+   for (const HdRenderPassAovBinding &aovBinding : aovBindings) {
+     const auto cyclesAov = kAovToPass.find(aovBinding.aovName);
+     if (cyclesAov == kAovToPass.end()) {
+-      // TODO: Use PASS_AOV_COLOR and PASS_AOV_VALUE for these?
+-      TF_WARN("Unknown pass %s", aovBinding.aovName.GetText());
++      // HdxTaskController always requests elementId for non-Storm delegates,
++      // but Cycles does not implement it. It is not used by the preview.
++      if (aovBinding.aovName != HdAovTokens->elementId) {
++        TF_WARN("Unknown pass %s", aovBinding.aovName.GetText());
++      }
+       continue;
+     }
+
