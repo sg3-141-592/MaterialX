@@ -37,6 +37,7 @@ option(MATERIALX_BUILD_PYTHON "Build the MaterialX Python package from C++ bindi
 option(MATERIALX_BUILD_VIEWER "Build the MaterialX Viewer." OFF)
 option(MATERIALX_BUILD_GRAPH_EDITOR "Build the MaterialX Graph Editor." OFF)
 option(MATERIALX_BUILD_RENDER_CYCLES "Build the Cycles render backend for the graph editor. Fetches a Cycles fork that can be linked as a library. Requires MATERIALX_BUILD_GRAPH_EDITOR and MATERIALX_BUILD_GEN_OSL." OFF)
+option(MATERIALX_BUILD_RENDER_HYDRA "Build the Hydra render backend for the graph editor using the bundled Cycles/USD dependencies. Requires MATERIALX_BUILD_GRAPH_EDITOR." OFF)
 set(MATERIALX_CYCLES_GIT_REPOSITORY "https://github.com/seang-ilm/cycles.git" CACHE STRING "Git repository for the Cycles fork used by MATERIALX_BUILD_RENDER_CYCLES.")
 set(MATERIALX_CYCLES_GIT_TAG "5_1-add-library-build-support" CACHE STRING "Git tag or branch for the Cycles fork used by MATERIALX_BUILD_RENDER_CYCLES.")
 set(MATERIALX_CYCLES_PRECOMPILED_LIB_DIR "" CACHE PATH "Directory containing the precompiled Cycles/Blender dependency libraries (the lib/ folder). When empty, MATERIALX_BUILD_RENDER_CYCLES fetches them into the build tree.")
@@ -94,6 +95,7 @@ if (CMAKE_SYSTEM_NAME MATCHES "iOS" OR CMAKE_SYSTEM_NAME MATCHES "tvOS" OR CMAKE
     set(MATERIALX_BUILD_VIEWER OFF)
     set(MATERIALX_BUILD_GRAPH_EDITOR OFF)
     set(MATERIALX_BUILD_RENDER_CYCLES OFF)
+    set(MATERIALX_BUILD_RENDER_HYDRA OFF)
     set(MATERIALX_BUILD_GEN_GLSL OFF)
     set(MATERIALX_BUILD_GEN_OSL OFF)
     set(MATERIALX_BUILD_GEN_MDL OFF)
@@ -113,6 +115,7 @@ if (MATERIALX_BUILD_APPLE_FRAMEWORK)
     set(MATERIALX_BUILD_VIEWER OFF)
     set(MATERIALX_BUILD_GRAPH_EDITOR OFF)
     set(MATERIALX_BUILD_RENDER_CYCLES OFF)
+    set(MATERIALX_BUILD_RENDER_HYDRA OFF)
     set(MATERIALX_BUILD_TESTS OFF)
     set(MATERIALX_BUILD_SHARED_LIBS ON)
 endif()
@@ -290,32 +293,44 @@ if(Cycles_DIR)
     find_package(Cycles CONFIG REQUIRED)
 endif()
 
-if(MATERIALX_BUILD_RENDER_CYCLES AND NOT TARGET Cycles::cycles)
+if((MATERIALX_BUILD_RENDER_CYCLES OR MATERIALX_BUILD_RENDER_HYDRA) AND NOT TARGET Cycles::cycles)
     if(NOT MATERIALX_BUILD_GRAPH_EDITOR)
-        message(FATAL_ERROR "MATERIALX_BUILD_RENDER_CYCLES requires MATERIALX_BUILD_GRAPH_EDITOR.")
+        message(FATAL_ERROR "MATERIALX_BUILD_RENDER_CYCLES and MATERIALX_BUILD_RENDER_HYDRA require MATERIALX_BUILD_GRAPH_EDITOR.")
     endif()
-    if(NOT MATERIALX_BUILD_GEN_OSL)
+    if(MATERIALX_BUILD_RENDER_CYCLES AND NOT MATERIALX_BUILD_GEN_OSL)
         message(FATAL_ERROR "MATERIALX_BUILD_RENDER_CYCLES requires MATERIALX_BUILD_GEN_OSL.")
     endif()
 
-    # Cycles is embedded, so it does not need its standalone executable or the
-    # USD/Hydra integration. A development install exposes the combined
-    # `Cycles::cycles` library, its headers, and the build-tree shader folder.
+    # Cycles is embedded, so it does not need its standalone executable. A
+    # development install exposes the combined `Cycles::cycles` library, its
+    # headers, and the build-tree shader folder. The USD/Hydra integration is
+    # enabled only for the Hydra render backend.
     set(WITH_CYCLES_STANDALONE OFF CACHE BOOL "" FORCE)
     set(WITH_CYCLES_DEVELOPMENT_INSTALL ON CACHE BOOL "" FORCE)
-    set(WITH_CYCLES_HYDRA_RENDER_DELEGATE OFF CACHE BOOL "" FORCE)
-    set(WITH_CYCLES_USD OFF CACHE BOOL "" FORCE)
-    set(WITH_USD OFF CACHE BOOL "" FORCE)
+    if(MATERIALX_BUILD_RENDER_HYDRA)
+        set(WITH_CYCLES_HYDRA_RENDER_DELEGATE ON CACHE BOOL "" FORCE)
+        set(WITH_CYCLES_USD ON CACHE BOOL "" FORCE)
+        set(WITH_USD ON CACHE BOOL "" FORCE)
+    else()
+        set(WITH_CYCLES_HYDRA_RENDER_DELEGATE OFF CACHE BOOL "" FORCE)
+        set(WITH_CYCLES_USD OFF CACHE BOOL "" FORCE)
+        set(WITH_USD OFF CACHE BOOL "" FORCE)
+    endif()
 
     include(FetchContent)
     if(POLICY CMP0169)
         cmake_policy(SET CMP0169 OLD)
     endif()
+    find_package(Git REQUIRED)
+    set(_materialx_cycles_patch "${CMAKE_CURRENT_SOURCE_DIR}/scripts/patches/cycles-hydra-usd.patch")
     FetchContent_Declare(cycles
         GIT_REPOSITORY "${MATERIALX_CYCLES_GIT_REPOSITORY}"
         GIT_TAG "${MATERIALX_CYCLES_GIT_TAG}"
         GIT_SHALLOW TRUE
-        GIT_SUBMODULES "")
+        GIT_SUBMODULES ""
+        PATCH_COMMAND "${CMAKE_COMMAND}"
+            "-DPATCH_FILE=${_materialx_cycles_patch}"
+            -P "${CMAKE_CURRENT_SOURCE_DIR}/scripts/ApplyPatch.cmake")
     # Populate the source now (without adding it as a subdirectory) so that the
     # dependency libraries can be fetched into the source tree first; Cycles
     # locates them at configure time.
@@ -378,8 +393,25 @@ if(MATERIALX_BUILD_RENDER_CYCLES AND NOT TARGET Cycles::cycles)
         endif()
     endif()
 
+    if(MATERIALX_CYCLES_PRECOMPILED_LIB_DIR)
+        set(_materialx_cycles_lib_root "${MATERIALX_CYCLES_PRECOMPILED_LIB_DIR}")
+    else()
+        set(_materialx_cycles_lib_root "${cycles_SOURCE_DIR}/lib")
+    endif()
+    file(GLOB _materialx_usd_roots "${_materialx_cycles_lib_root}/*/usd")
+    if(_materialx_usd_roots)
+        list(GET _materialx_usd_roots 0 _materialx_usd_root)
+        set(MATERIALX_CYCLES_USD_ROOT "${_materialx_usd_root}" CACHE INTERNAL
+            "Bundled USD installation used by the Hydra render backend")
+    endif()
+
     add_subdirectory("${cycles_SOURCE_DIR}" "${cycles_BINARY_DIR}")
-    message(STATUS "Cycles render backend enabled (embedded)")
+    if(MATERIALX_BUILD_RENDER_CYCLES)
+        message(STATUS "Cycles render backend enabled (embedded)")
+    endif()
+    if(MATERIALX_BUILD_RENDER_HYDRA)
+        message(STATUS "Hydra render backend enabled (embedded Cycles/USD)")
+    endif()
 endif()
 
 if (MATERIALX_BUILD_USE_CCACHE)

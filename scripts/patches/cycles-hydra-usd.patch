@@ -1,0 +1,49 @@
+diff --git a/src/hydra/material.cpp b/src/hydra/material.cpp
+index 3b9919f..f8b4b0c 100644
+--- a/src/hydra/material.cpp
++++ b/src/hydra/material.cpp
+@@ -270,6 +270,12 @@ void HdCyclesMaterial::UpdateParameters(NodeDesc &nodeDesc,
+   for (const auto &param : parameters) {
+     VtValue value = param.second;
+ 
++    // Sdr material networks carry metadata parameters such as
++    // "typeName:diffuseColor" alongside actual shader inputs. Ignore them.
++    if (param.first.GetString().rfind("typeName:", 0) == 0) {
++      continue;
++    }
++
+     // See if the parameter name is in USDPreviewSurface terms, and needs to be converted
+     const UsdToCyclesMapping *inputMapping = nodeDesc.mapping;
+     const std::string inputName = inputMapping ?
+@@ -438,8 +444,15 @@ void HdCyclesMaterial::PopulateShaderGraph(const HdMaterialNetwork2 &networkMap)
+         nodeDesc.mapping = sUsdToCyles->findCycles(cyclesType);
+       }
+       else {
++        // UsdMtlx and newer UsdShade material networks use the MaterialX
++        // nodedef name for UsdPreviewSurface. Treat it as UsdPreviewSurface so
++        // the existing remapping applies.
++        TfToken usdNodeType = nodeEntry.second.nodeTypeId;
++        if (nodeTypeId == "ND_UsdPreviewSurface_surfaceshader") {
++          usdNodeType = TfToken("UsdPreviewSurface");
++        }
+         // Check if any remapping is needed (e.g. for USDPreviewSurface to Cycles nodes)
+-        nodeDesc.mapping = sUsdToCyles->findUsd(nodeEntry.second.nodeTypeId);
++        nodeDesc.mapping = sUsdToCyles->findUsd(usdNodeType);
+         if (nodeDesc.mapping) {
+           cyclesType = nodeDesc.mapping->nodeType();
+         }
+diff --git a/src/hydra/render_delegate.cpp b/src/hydra/render_delegate.cpp
+index ea3dae9..246b4a3 100644
+--- a/src/hydra/render_delegate.cpp
++++ b/src/hydra/render_delegate.cpp
+@@ -108,6 +108,10 @@ SessionParams GetSessionParams(const HdRenderSettingsMap &settings)
+     params.device = Device::get_multi_device(devices, params.threads, params.background);
+   }
+ 
++  // Keep the denoise device in sync with the render device. The default empty
++  // denoise device triggers an assertion in DeviceInfo equality checks.
++  params.denoise_device = params.device;
++
+   return params;
+ }
+ 
