@@ -35,7 +35,7 @@ const std::string options =
     "    --font [FILENAME]              Specify the name of the custom font file to use.  If not specified the default font will be used.\n"
     "    --fontSize [SIZE]              Specify font size to use for the custom font.  If not specified a default of 18 will be used.\n"
     "    --captureFilename [FILENAME]   Specify the filename to which the first rendered frame should be written\n"
-    "    --renderBackend [NAME]         Specify the initial render backend (e.g. GLSL, Cycles)\n"
+    "    --renderBackend [NAME]         Specify the initial render backend (e.g. GLSL, Cycles, Hydra (Cycles))\n"
     "    --renderPass [NAME]            Specify the render pass to display (e.g. combined, albedo)\n"
     "    --denoise [true|false]         Enable the Cycles CPU denoiser (default true)\n"
     "    --denoiseStartSample [N]       Number of samples to render before denoising begins (default 16)\n"

@@ -9,6 +9,9 @@
 #ifdef MATERIALX_BUILD_RENDER_CYCLES
 #include <MaterialXGraphEditor/CyclesRenderPipeline.h>
 #endif
+#ifdef MATERIALX_BUILD_RENDER_HYDRA
+#include <MaterialXGraphEditor/HydraRenderPipeline.h>
+#endif
 
 #include <MaterialXRenderGlsl/External/Glad/glad.h>
 
@@ -70,10 +73,24 @@ RenderView::RenderView(mx::DocumentPtr doc,
 
 std::vector<std::string> RenderView::getAvailableBackends()
 {
-    std::vector<std::string> backends = { "GLSL" };
+    static const std::vector<std::string> backends = []()
+    {
+        std::vector<std::string> result = { "GLSL" };
 #ifdef MATERIALX_BUILD_RENDER_CYCLES
-    backends.push_back("Cycles");
+        result.push_back("Cycles");
 #endif
+#ifdef MATERIALX_BUILD_RENDER_HYDRA
+        if (HydraRenderPipeline::isDelegateAvailable("Cycles"))
+        {
+            result.push_back("Hydra (Cycles)");
+        }
+        if (HydraRenderPipeline::isDelegateAvailable("GL"))
+        {
+            result.push_back("Hydra (GL)");
+        }
+#endif
+        return result;
+    }();
     return backends;
 }
 
@@ -93,6 +110,22 @@ RenderPipelinePtr RenderView::createPipeline(const std::string& backendName)
             _document, _stdLib, _meshFilename.asString(),
             _envRadianceFilename.asString(), _searchPath,
             _viewWidth, _viewHeight, _settings.renderPass);
+    }
+#endif
+#ifdef MATERIALX_BUILD_RENDER_HYDRA
+    if (backendName == "Hydra (Cycles)")
+    {
+        return std::make_shared<HydraRenderPipeline>(
+            _document, _stdLib, _meshFilename.asString(),
+            _envRadianceFilename.asString(), _searchPath,
+            _viewWidth, _viewHeight, "Cycles", _settings.renderPass);
+    }
+    if (backendName == "Hydra (GL)")
+    {
+        return std::make_shared<HydraRenderPipeline>(
+            _document, _stdLib, _meshFilename.asString(),
+            _envRadianceFilename.asString(), _searchPath,
+            _viewWidth, _viewHeight, "GL", _settings.renderPass);
     }
 #endif
     return nullptr;
