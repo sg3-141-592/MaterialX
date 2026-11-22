@@ -59,7 +59,7 @@ Available backend entries depend on the Hydra render delegates found at runtime:
 - `Hydra (Cycles)` uses the bundled `hdCycles` delegate.
 - `Hydra (GL)` is shown when a compatible Storm/GL delegate is available.
 
-The native `Cycles` backend remains the default high-fidelity path for OSL materials, denoising, adaptive sampling, and render-pass controls.  The initial Hydra backend translates the selected MaterialX material to `UsdPreviewSurface`; full MaterialX render-context support is a follow-up.  Image textures connected to the mapped `UsdPreviewSurface` inputs are authored as `UsdUVTexture` nodes, but `place2d` transforms and other advanced MaterialX nodes are not evaluated yet.  `Hydra (Cycles)` does expose an `Albedo` render pass, which uses Cycles' diffuse-color pass to inspect unlit base color and texture data.
+The native `Cycles` backend remains the default high-fidelity path for OSL materials, denoising, adaptive sampling, and render-pass controls.  The initial Hydra backend translates the selected MaterialX material to `UsdPreviewSurface`; full MaterialX render-context support is a follow-up.  Image textures connected to the mapped `UsdPreviewSurface` inputs are authored as `UsdUVTexture` nodes, and their `texcoord` and `place2d` transforms are baked into per-texture UV primvars.  Other advanced MaterialX nodes are not evaluated yet.  `Hydra (Cycles)` does expose an `Albedo` render pass, which uses Cycles' diffuse-color pass to inspect unlit base color and texture data.
 
 ### Renderer Backend Architecture
 

@@ -585,21 +585,34 @@ void authorImageTexture(const UsdStagePtr& stage,
     texture.CreateInput(TfToken("sourceColorSpace"), SdfValueTypeNames->Token)
         .Set(TfToken(textureColorSpace(fileInput)));
 
-    // Bake the mesh UVs into a per-texture primvar. MaterialX's place2d
-    // transform is not applied yet; raw UVs keep image textures visible while
-    // full nodegraph evaluation remains a follow-up.
+    // Bake the material's place2d transform into a per-texture UV primvar.
+    // hdCycles samples the texture V axis opposite to MaterialX's native image
+    // sampling, so the final V coordinate is flipped for the Cycles delegate.
     std::string uvName = "st";
     if (!meshUVs.empty())
     {
         VtVec2fArray transformedUVs;
         transformedUVs.reserve(meshUVs.size());
+        mx::InputPtr texcoordInput = imageNode->getInput("texcoord");
+        mx::NodePtr place2d = texcoordInput ? texcoordInput->getConnectedNode() : nullptr;
+        mx::Vector2 offset(0.0f, 0.0f);
+        mx::Vector2 scale(1.0f, 1.0f);
+        mx::Vector2 pivot(0.0f, 0.0f);
+        if (place2d && place2d->getCategory() == "place2d")
+        {
+            getMtlxInputValue(place2d, "offset", offset);
+            getMtlxInputValue(place2d, "scale", scale);
+            getMtlxInputValue(place2d, "pivot", pivot);
+        }
         for (const GfVec2f& uv : meshUVs)
         {
             float u = uv[0];
             float v = uv[1];
-            // hdCycles interprets the V axis opposite to MaterialX's native
-            // image sampling. Flip it so textured previews match the native
-            // Cycles backend.
+            if (place2d && place2d->getCategory() == "place2d")
+            {
+                u = (u - pivot[0]) / scale[0] - offset[0] + pivot[0];
+                v = (v - pivot[1]) / scale[1] - offset[1] + pivot[1];
+            }
             if (flipTextureV)
             {
                 v = 1.0f - v;
@@ -885,89 +898,108 @@ void HydraRenderPipeline::Impl::buildStage()
 
     VtVec2fArray meshUVs;
 
-    // Geometry: use the first mesh partition. This matches the current preview
-    // use case and can be extended to geom subsets later.
+    // Geometry: merge all meshes and partitions, matching the native Cycles
+    // and GLSL previews.
     if (geometryHandler && !geometryHandler->getMeshes().empty())
     {
-        mx::MeshPtr sourceMesh = geometryHandler->getMeshes()[0];
-        if (sourceMesh && sourceMesh->getPartitionCount() > 0)
+        const mx::Vector3 boundsMin = geometryHandler->getMinimumBounds();
+        const mx::Vector3 boundsMax = geometryHandler->getMaximumBounds();
+        const mx::Vector3 boundsCenter = (boundsMin + boundsMax) * 0.5f;
+        const float boundsRadius = (boundsMax - boundsCenter).getMagnitude();
+        const float meshScale = boundsRadius > 0.0f ? 2.0f / boundsRadius : 1.0f;
+
+        VtVec3fArray points;
+        VtVec3fArray normals;
+        VtVec2fArray texcoords;
+        VtIntArray counts;
+        VtIntArray indices;
+        bool hasNormals = true;
+        size_t vertexOffset = 0;
+
+        for (const mx::MeshPtr& sourceMesh : geometryHandler->getMeshes())
         {
-            mx::MeshPartitionPtr partition = sourceMesh->getPartition(0);
-            mesh = UsdGeomMesh::Define(stage, SdfPath("/Model/Mesh"));
+            if (!sourceMesh)
+            {
+                continue;
+            }
 
-            // Match the GLSL and native Cycles previews by centering the mesh
-            // and normalizing it to the same two-unit bounding sphere.
-            const mx::Vector3 boundsMin = sourceMesh->getMinimumBounds();
-            const mx::Vector3 boundsMax = sourceMesh->getMaximumBounds();
-            const mx::Vector3 boundsCenter = (boundsMin + boundsMax) * 0.5f;
-            const float boundsRadius = (boundsMax - boundsCenter).getMagnitude();
-            const float meshScale = boundsRadius > 0.0f ? 2.0f / boundsRadius : 1.0f;
-
-            VtVec3fArray points;
             mx::MeshStreamPtr positionStream = sourceMesh->getStream(mx::MeshStream::POSITION_ATTRIBUTE, 0);
-            if (positionStream)
+            if (!positionStream)
             {
-                points.reserve(positionStream->getSize());
-                for (size_t i = 0; i < positionStream->getSize(); ++i)
-                {
-                    const mx::Vector3& p = positionStream->getElement<mx::Vector3>(i);
-                    const mx::Vector3 normalized = (p - boundsCenter) * meshScale;
-                    points.push_back(GfVec3f(normalized[0], normalized[1], normalized[2]));
-                }
+                continue;
             }
-            mesh.CreatePointsAttr().Set(points);
-
-            VtIntArray counts;
-            counts.resize(partition->getFaceCount(), 3);
-            mesh.CreateFaceVertexCountsAttr().Set(counts);
-
-            VtIntArray indices;
-            indices.reserve(partition->getIndices().size());
-            for (uint32_t index : partition->getIndices())
+            for (size_t i = 0; i < positionStream->getSize(); ++i)
             {
-                indices.push_back(static_cast<int>(index));
+                const mx::Vector3& p = positionStream->getElement<mx::Vector3>(i);
+                const mx::Vector3 normalized = (p - boundsCenter) * meshScale;
+                points.push_back(GfVec3f(normalized[0], normalized[1], normalized[2]));
             }
-            mesh.CreateFaceVertexIndicesAttr().Set(indices);
 
             mx::MeshStreamPtr normalStream = sourceMesh->getStream(mx::MeshStream::NORMAL_ATTRIBUTE, 0);
-            if (normalStream)
+            if (normalStream && normalStream->getSize() == positionStream->getSize())
             {
-                VtVec3fArray normals;
-                normals.reserve(normalStream->getSize());
                 for (size_t i = 0; i < normalStream->getSize(); ++i)
                 {
                     const mx::Vector3& n = normalStream->getElement<mx::Vector3>(i);
                     normals.push_back(GfVec3f(n[0], n[1], n[2]));
                 }
-                mesh.CreateNormalsAttr().Set(normals);
-                mesh.SetNormalsInterpolation(UsdGeomTokens->vertex);
+            }
+            else
+            {
+                hasNormals = false;
             }
 
             mx::MeshStreamPtr texcoordStream = sourceMesh->getStream(mx::MeshStream::TEXCOORD_ATTRIBUTE, 0);
-            if (texcoordStream)
+            if (texcoordStream && texcoordStream->getSize() == positionStream->getSize())
             {
-                VtVec2fArray texcoords;
-                texcoords.reserve(texcoordStream->getSize());
                 for (size_t i = 0; i < texcoordStream->getSize(); ++i)
                 {
                     const mx::Vector2& uv = texcoordStream->getElement<mx::Vector2>(i);
                     texcoords.push_back(GfVec2f(uv[0], uv[1]));
                 }
-                UsdGeomPrimvarsAPI primvars(mesh.GetPrim());
-                UsdGeomPrimvar st = primvars.CreatePrimvar(TfToken("st"), SdfValueTypeNames->TexCoord2fArray, UsdGeomTokens->vertex);
-                st.Set(texcoords);
-                meshUVs = texcoords;
             }
 
-            const mx::Vector3 extentMin = (boundsMin - boundsCenter) * meshScale;
-            const mx::Vector3 extentMax = (boundsMax - boundsCenter) * meshScale;
-            mesh.CreateExtentAttr().Set(VtVec3fArray{
-                GfVec3f(extentMin[0], extentMin[1], extentMin[2]),
-                GfVec3f(extentMax[0], extentMax[1], extentMax[2])});
-            mesh.CreateDoubleSidedAttr().Set(true);
-            mesh.CreateOrientationAttr().Set(UsdGeomTokens->rightHanded);
-            mesh.CreateSubdivisionSchemeAttr().Set(UsdGeomTokens->none);
+            for (size_t partIndex = 0; partIndex < sourceMesh->getPartitionCount(); ++partIndex)
+            {
+                mx::MeshPartitionPtr part = sourceMesh->getPartition(partIndex);
+                if (!part)
+                {
+                    continue;
+                }
+                counts.resize(counts.size() + part->getFaceCount(), 3);
+                for (uint32_t index : part->getIndices())
+                {
+                    indices.push_back(static_cast<int>(index + vertexOffset));
+                }
+            }
+            vertexOffset += positionStream->getSize();
         }
+
+        mesh = UsdGeomMesh::Define(stage, SdfPath("/Model/Mesh"));
+        mesh.CreatePointsAttr().Set(points);
+        mesh.CreateFaceVertexCountsAttr().Set(counts);
+        mesh.CreateFaceVertexIndicesAttr().Set(indices);
+        if (hasNormals && normals.size() == points.size())
+        {
+            mesh.CreateNormalsAttr().Set(normals);
+            mesh.SetNormalsInterpolation(UsdGeomTokens->vertex);
+        }
+        if (!texcoords.empty() && texcoords.size() == points.size())
+        {
+            UsdGeomPrimvarsAPI primvars(mesh.GetPrim());
+            UsdGeomPrimvar st = primvars.CreatePrimvar(TfToken("st"), SdfValueTypeNames->TexCoord2fArray, UsdGeomTokens->vertex);
+            st.Set(texcoords);
+            meshUVs = texcoords;
+        }
+
+        const mx::Vector3 extentMin = (boundsMin - boundsCenter) * meshScale;
+        const mx::Vector3 extentMax = (boundsMax - boundsCenter) * meshScale;
+        mesh.CreateExtentAttr().Set(VtVec3fArray{
+            GfVec3f(extentMin[0], extentMin[1], extentMin[2]),
+            GfVec3f(extentMax[0], extentMax[1], extentMax[2])});
+        mesh.CreateDoubleSidedAttr().Set(true);
+        mesh.CreateOrientationAttr().Set(UsdGeomTokens->rightHanded);
+        mesh.CreateSubdivisionSchemeAttr().Set(UsdGeomTokens->none);
     }
 
     // Material
